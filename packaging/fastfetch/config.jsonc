@@ -1,8 +1,8 @@
 // Fastfetch on AROS: the compact view.
 //
 // This file is read when you have no configuration of your own: Fastfetch
-// looks in ENVARC:fastfetch/, ENV:fastfetch/ and then here, beside the
-// program. To change it, copy it to ENVARC:fastfetch/config.jsonc and edit
+// looks in ENVARC:fastfetch/, ENV:fastfetch/ and then here, in the share
+// drawer beside the program. To change it, copy it to ENVARC:fastfetch/config.jsonc and edit
 // that copy, or write a full one with  fastfetch --gen-config
 //
 // The small logo goes above the list when the window is too narrow for it

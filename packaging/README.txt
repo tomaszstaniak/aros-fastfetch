@@ -42,8 +42,8 @@ Configuration
     fastfetch --gen-config       writes ENVARC:fastfetch/config.jsonc
 
 Fastfetch reads ENVARC:fastfetch/config.jsonc, then ENV:fastfetch/, then
-fastfetch/config.jsonc in the drawer it was started from, which is the
-compact view; copy that file to ENVARC:fastfetch/ to change it. The file format is that of Fastfetch on
+share/fastfetch/config.jsonc in the drawer it was started from, which is
+the compact view; copy that file to ENVARC:fastfetch/ to change it. The file format is that of Fastfetch on
 other systems: https://github.com/fastfetch-cli/fastfetch/wiki/Configuration
 Paths in it are AmigaDOS paths.
 
