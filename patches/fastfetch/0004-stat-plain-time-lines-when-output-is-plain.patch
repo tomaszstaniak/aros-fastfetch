@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] Stat: plain time lines when output is plain
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: --stat writes each module's time with cursor movement and colour
+sequences even with --pipe or redirected output, so a file got escape
+sequences.
+Solution: in pipe mode print the time as a line of its own after the
+module's output, without any sequence.
+Scope: common/impl/commandoption.c and common/impl/jsonconfig.c; terminal
+output is unchanged.
+Upstream-Status: suitable for upstream.
+Verification: redirected --stat on pool v1-1, v11-1 and rpi-1 (2026-10-27)
+contains no ESC byte.
+Removal: when upstream keeps --stat output plain in pipe mode.
+---
+ src/common/impl/commandoption.c | 8 +++++++-
+ src/common/impl/jsonconfig.c    | 8 +++++++-
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/impl/commandoption.c b/src/common/impl/commandoption.c
+index bc5ee9e..ae6c11d 100644
+--- a/src/common/impl/commandoption.c
++++ b/src/common/impl/commandoption.c
+@@ -303,7 +303,13 @@ void ffPrintCommandOption(FFdata* data) {
+                                                                                                                      : FF_COLOR_FG_RED),
+                         ms);
+                 }
+-                printf("\e7\e[1A\e[9999999C\e[%dD%s\e8", len - 1, str); // Save; Up 1; Right 9999999; Left <len - 1>; Print <str>; Load
++                if (instance.config.display.pipe) {
++                    // Plain output has no cursor control: the time goes on
++                    // a line of its own after the module's.
++                    printf("%.3fms\n", ms);
++                } else {
++                    printf("\e7\e[1A\e[9999999C\e[%dD%s\e8", len - 1, str); // Save; Up 1; Right 9999999; Left <len - 1>; Print <str>; Load
++                }
+             }
+         }
+ 
+diff --git a/src/common/impl/jsonconfig.c b/src/common/impl/jsonconfig.c
+index c0b14e2..6ec8f26 100644
+--- a/src/common/impl/jsonconfig.c
++++ b/src/common/impl/jsonconfig.c
+@@ -416,7 +416,13 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
+                                                                                                                      : FF_COLOR_FG_RED),
+                         ms);
+                 }
+-                printf("\e7\e[1A\e[9999999C\e[%dD%s\e8", len - 1, str); // Save; Up 1; Right 9999999; Left <len - 1>; Print <str>; Load
++                if (instance.config.display.pipe) {
++                    // Plain output has no cursor control: the time goes on
++                    // a line of its own after the module's.
++                    printf("%.3fms\n", ms);
++                } else {
++                    printf("\e7\e[1A\e[9999999C\e[%dD%s\e8", len - 1, str); // Save; Up 1; Right 9999999; Left <len - 1>; Print <str>; Load
++                }
+             }
+         }
+ 

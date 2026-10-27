@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] AROS: Ctrl-C ends --dynamic-interval
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: --dynamic-interval runs until a signal handler exits the
+program. On AROS, Ctrl-C is the task's SIGBREAKF_CTRL_C, not a POSIX
+SIGINT, so the handler never ran and only closing the window ended it.
+Solution: ffTimeSleep waits in Delay() ticks on AROS and returns false
+when Ctrl-C arrived; the dynamic loop then leaves and finishes normally,
+which restores the console (line wrap, alternate screen) as the handler
+would.
+Scope: common/time.h (AROS branch) and the dynamic loop in fastfetch.c,
+which now also leaves when the sleep reports an interruption on other
+systems (there the handler has exited before).
+Upstream-Status: the loop change is generic; the sleep is AROS-specific.
+Verification: Ctrl-C in Limpet on pool v1-1, v11-1 and rpi-1 (2026-10-27):
+the primary screen came back and the Shell got rc 0.
+Removal: when the AROS C library delivers Ctrl-C as SIGINT.
+---
+ src/common/time.h | 8 +++++++-
+ src/fastfetch.c   | 7 ++++++-
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/common/time.h b/src/common/time.h
+index a4d2534..f88607a 100644
+--- a/src/common/time.h
++++ b/src/common/time.h
+@@ -51,9 +51,15 @@ static inline uint64_t ffTimeGetNow(void) {
+ #endif
+ }
+ 
++#ifdef __AROS__
++    #include "common/aros/aros_sleep.h"
++#endif
++
+ // Returns true if not interrupted
+ static inline bool ffTimeSleep(uint32_t msec) {
+-#ifdef _WIN32
++#ifdef __AROS__
++    return ffArosSleep(msec);
++#elif defined(_WIN32)
+     LARGE_INTEGER interval;
+     interval.QuadPart = -(int64_t) msec * 10000; // Relative time in 100-nanosecond intervals
+     return NT_SUCCESS(NtDelayExecution(TRUE, &interval));
+diff --git a/src/fastfetch.c b/src/fastfetch.c
+index 583a1f0..ac66156 100644
+--- a/src/fastfetch.c
++++ b/src/fastfetch.c
+@@ -818,7 +818,12 @@ static void run(FFdata* data) {
+             ffLogoPrintRemaining(); // `logoLineCacheClear` inside so that ffLogoPrintLine will use `\e[nC` to move the cursor to the right position instead of reprinting the logo
+             fputs("\e[J", stdout); // Clear from cursor to the end of the screen to prevent artifacts when the new output is shorter than the previous one
+             fflush(stdout);
+-            ffTimeSleep(instance.state.dynamicInterval);
++            if (!ffTimeSleep(instance.state.dynamicInterval)) {
++                // Interrupted where no signal handler ends the program
++                // (Ctrl-C on AROS): finish normally, which restores the
++                // console (ffFinish).
++                break;
++            }
+             fputs("\e[H", stdout); // Move cursor to the top left corner to overwrite the previous output
+             instance.state.keysHeight = 0; // Reset keysHeight so `ffLogoPrintRemaining` will recalculate it
+             ffCacheInvalidateAll(); // Drop the detection results cached for the previous round, so that this round re-detects them

@@ -1,0 +1,2543 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] AROS: build the AROS target and detect its data natively
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: fastfetch builds for Linux, BSD, macOS, Windows, Haiku and others,
+not for AROS, which has a POSIX C library (posixc) but no /proc, /sys,
+dlopen, poll, fnmatch or user accounts, AmigaDOS paths and its own APIs
+for everything fastfetch reports.
+Solution: an AROS branch in CMakeLists.txt (features that need missing
+facilities off, link through the SDK's own GCC driver, no full strip) and
+*_aros.c backends that ask AROS itself: exec, dos, graphics, intuition,
+locale, processor.resource, timer.device, bsdsocket.library (opened by the
+Local IP module only, so the program starts without a TCP/IP stack).
+Paths follow AmigaDOS (ENVARC:, ENV:, PROGDIR:; never "Vol:/file").
+Terminal capabilities come from the Limpet SDK's presentation and identity
+queries on the actual output handle; every stdout write passes one filter
+for Amiga pen colours and Latin-1 consoles. Modules without a reliable
+source report "Not supported on AROS"; missing data stays missing.
+ABIv11 gets small replacements for POSIX calls its C library lacks.
+Scope: AROS only. Upstream files are touched only behind __AROS__ / the
+AROS CMake branch: disk folder patterns use dos.library matching and ';'
+as separator (':' is part of every AmigaDOS path), io_unix.c has no poll,
+netif.h includes the BSD headers AROS needs first, the interactive
+--gen-config needs a terminal fastfetch cannot query on AROS and is off.
+Upstream-Status: AROS-specific; could be offered upstream as a platform
+once it has users. Needs the Limpet SDK 0.6.0 sources (vendor/limpet-sdk).
+Verification: built for aros-x86_64-abiv11-pc, aros-x86_64-abiv1-pc and
+aros-aarch64-abiv1-raspi; tests/aros/smoke.script and console runs on pool
+v1-1, v11-1 and rpi-1 (2026-10-27); host tests in tests/test_port.py.
+Removal: when upstream fastfetch supports AROS.
+---
+ CMakeLists.txt                                | 126 +++++++-
+ src/common/aros/aros_compat_abiv11.c          |  67 ++++
+ src/common/aros/aros_compat_abiv11.h          |  35 ++
+ src/common/aros/aros_output.c                 | 298 ++++++++++++++++++
+ src/common/aros/aros_output.h                 |  42 +++
+ src/common/aros/aros_sleep.c                  |  17 +
+ src/common/aros/aros_sleep.h                  |   9 +
+ src/common/aros/aros_terminal.c               |  86 +++++
+ src/common/aros/aros_terminal.h               |  32 ++
+ src/common/aros/aros_version.c                |  72 +++++
+ src/common/aros/aros_version.h                |  15 +
+ src/common/aros/genconfig_aros.c              |   8 +
+ src/common/impl/FFPlatform_aros.c             | 110 +++++++
+ src/common/impl/binary_aros.c                 |  25 ++
+ src/common/impl/io_unix.c                     |  13 +-
+ src/common/impl/netif_aros.c                  |  10 +
+ src/common/impl/networking_aros.c             |  13 +
+ src/common/impl/processing_aros.c             | 105 ++++++
+ src/common/netif.h                            |   6 +
+ src/detection/codec/codec_aros.c              |   5 +
+ src/detection/cpu/cpu_aros.c                  |  36 +++
+ src/detection/cpuusage/cpuusage_aros.c        |   6 +
+ src/detection/de/de_aros.c                    |  18 ++
+ src/detection/disk/disk.c                     |  24 +-
+ src/detection/disk/disk.h                     |   3 +-
+ src/detection/disk/disk_aros.c                | 150 +++++++++
+ .../displayserver/displayserver_aros.c        |  67 ++++
+ src/detection/dns/dns_aros.c                  |   6 +
+ src/detection/font/font_aros.c                |  46 +++
+ src/detection/gpu/gpu_aros.c                  |   7 +
+ src/detection/initsystem/initsystem_aros.c    |   5 +
+ src/detection/locale/locale_aros.c            |  39 +++
+ src/detection/localip/localip_aros.c          | 155 +++++++++
+ src/detection/media/media_aros.c              |   5 +
+ src/detection/memory/memory_aros.c            |  14 +
+ src/detection/opengl/opengl_aros.c            |   5 +
+ src/detection/os/os_aros.c                    |  47 +++
+ src/detection/packages/packages_aros.c        |   7 +
+ src/detection/processes/processes_aros.c      |  21 ++
+ src/detection/sound/sound_aros.c              |   5 +
+ src/detection/swap/swap_aros.c                |   6 +
+ .../terminalfont/terminalfont_aros.c          |   7 +
+ .../terminalshell/terminalshell_aros.c        | 121 +++++++
+ .../terminalsize/terminalsize_aros.c          |  15 +
+ src/detection/top/top_aros.c                  |   5 +
+ src/detection/uptime/uptime_aros.c            |  29 ++
+ src/detection/users/users_aros.c              |   6 +
+ src/detection/version/version.c               |   2 +
+ src/detection/wallpaper/wallpaper_aros.c      |   5 +
+ src/detection/wmtheme/wmtheme_aros.c          |   6 +
+ src/fastfetch.c                               |   5 +
+ src/modules/colors/colors.c                   |   8 +
+ src/modules/disk/disk.c                       |   4 +-
+ src/options/display.c                         |  10 +
+ 54 files changed, 1982 insertions(+), 7 deletions(-)
+ create mode 100644 src/common/aros/aros_compat_abiv11.c
+ create mode 100644 src/common/aros/aros_compat_abiv11.h
+ create mode 100644 src/common/aros/aros_output.c
+ create mode 100644 src/common/aros/aros_output.h
+ create mode 100644 src/common/aros/aros_sleep.c
+ create mode 100644 src/common/aros/aros_sleep.h
+ create mode 100644 src/common/aros/aros_terminal.c
+ create mode 100644 src/common/aros/aros_terminal.h
+ create mode 100644 src/common/aros/aros_version.c
+ create mode 100644 src/common/aros/aros_version.h
+ create mode 100644 src/common/aros/genconfig_aros.c
+ create mode 100644 src/common/impl/FFPlatform_aros.c
+ create mode 100644 src/common/impl/binary_aros.c
+ create mode 100644 src/common/impl/netif_aros.c
+ create mode 100644 src/common/impl/networking_aros.c
+ create mode 100644 src/common/impl/processing_aros.c
+ create mode 100644 src/detection/codec/codec_aros.c
+ create mode 100644 src/detection/cpu/cpu_aros.c
+ create mode 100644 src/detection/cpuusage/cpuusage_aros.c
+ create mode 100644 src/detection/de/de_aros.c
+ create mode 100644 src/detection/disk/disk_aros.c
+ create mode 100644 src/detection/displayserver/displayserver_aros.c
+ create mode 100644 src/detection/dns/dns_aros.c
+ create mode 100644 src/detection/font/font_aros.c
+ create mode 100644 src/detection/gpu/gpu_aros.c
+ create mode 100644 src/detection/initsystem/initsystem_aros.c
+ create mode 100644 src/detection/locale/locale_aros.c
+ create mode 100644 src/detection/localip/localip_aros.c
+ create mode 100644 src/detection/media/media_aros.c
+ create mode 100644 src/detection/memory/memory_aros.c
+ create mode 100644 src/detection/opengl/opengl_aros.c
+ create mode 100644 src/detection/os/os_aros.c
+ create mode 100644 src/detection/packages/packages_aros.c
+ create mode 100644 src/detection/processes/processes_aros.c
+ create mode 100644 src/detection/sound/sound_aros.c
+ create mode 100644 src/detection/swap/swap_aros.c
+ create mode 100644 src/detection/terminalfont/terminalfont_aros.c
+ create mode 100644 src/detection/terminalshell/terminalshell_aros.c
+ create mode 100644 src/detection/terminalsize/terminalsize_aros.c
+ create mode 100644 src/detection/top/top_aros.c
+ create mode 100644 src/detection/uptime/uptime_aros.c
+ create mode 100644 src/detection/users/users_aros.c
+ create mode 100644 src/detection/wallpaper/wallpaper_aros.c
+ create mode 100644 src/detection/wmtheme/wmtheme_aros.c
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 61efe08..a0cd109 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -42,6 +42,23 @@ elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Haiku")
+     set(Haiku TRUE CACHE BOOL "..." FORCE)
+ elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "GNU")
+     set(GNU TRUE CACHE BOOL "..." FORCE)
++elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "AROS")
++    set(AROS TRUE CACHE BOOL "..." FORCE)
++    # Features AROS has no library for, or that fastfetch would load with
++    # dlopen, which AROS does not have. Threads are off as well: detection
++    # is quick, and a one-task program needs no pthread library.
++    foreach(opt ENABLE_THREADS ENABLE_IMAGE_LOGO ENABLE_ZLIB ENABLE_LUA ENABLE_LIBZFS
++                ENABLE_WORDEXP ENABLE_LTO BUILD_FLASHFETCH INSTALL_LICENSE ENABLE_FREETYPE)
++        set(${opt} OFF CACHE BOOL "Not available on AROS" FORCE)
++    endforeach()
++    # check_function_exists cannot link an AROS program here (the toolchain
++    # file builds a static library), so every check would pass. What the
++    # AROS C libraries have is stated instead.
++    foreach(fn HAVE_MALLOC_USABLE_SIZE HAVE_MALLOC_SIZE HAVE_MSVC_MSIZE HAVE_PIPE2 HAVE_GETLOADAVG)
++        set(${fn} 0 CACHE INTERNAL "Not in the AROS C libraries" FORCE)
++    endforeach()
++    set(HAVE_MEMRCHR 0 CACHE INTERNAL "Not in the AROS C libraries" FORCE)
++    set(CMAKE_DL_LIBS "") # no dlopen, no libdl
+ elseif(NOT APPLE AND NOT WIN32)
+     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}")
+ endif()
+@@ -284,7 +301,9 @@ endif()
+ # Release and MinSizeRel drop the symbol table and the unwind metadata; Debug and RelWithDebInfo keep
+ # both, so those stay fully debuggable. CMake does not strip MinSizeRel on its own.
+ if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+-    if(NOT APPLE) # ld: warning: -s is obsolete
++    # AROS: a fully stripped executable can lose the relocations its loader
++    # needs (an x86_64 AROS One build then fails in its first OpenLibrary).
++    if(NOT APPLE AND NOT AROS) # ld: warning: -s is obsolete
+         # The symbol table is dead weight: 437 KB (16%) of a MinGW build, 91 KB (3%) of a GCC build.
+         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-s")
+     endif()
+@@ -1371,6 +1390,93 @@ elseif(Haiku)
+     else()
+         list(APPEND LIBFASTFETCH_SRC src/detection/loadavg/loadavg_nosupport.c)
+     endif()
++elseif(AROS)
++    list(APPEND LIBFASTFETCH_SRC
++        src/common/impl/io_unix.c
++        src/common/impl/netif_aros.c
++        src/common/impl/networking_aros.c
++        src/common/impl/processing_aros.c
++        src/common/impl/FFPlatform_aros.c
++        src/common/impl/binary_aros.c
++        src/common/impl/kmod_nosupport.c
++        src/common/aros/aros_terminal.c
++        src/common/aros/aros_output.c
++        src/common/aros/aros_version.c
++        src/common/aros/aros_sleep.c
++        src/common/aros/genconfig_aros.c
++        src/detection/battery/battery_nosupport.c
++        src/detection/bios/bios_nosupport.c
++        src/detection/board/board_nosupport.c
++        src/detection/bootmgr/bootmgr_nosupport.c
++        src/detection/brightness/brightness_nosupport.c
++        src/detection/btrfs/btrfs_nosupport.c
++        src/detection/chassis/chassis_nosupport.c
++        src/detection/cpu/cpu_aros.c
++        src/detection/cpucache/cpucache_nosupport.c
++        src/detection/cpuusage/cpuusage_aros.c
++        src/detection/cursor/cursor_nosupport.c
++        src/detection/bluetooth/bluetooth_nosupport.c
++        src/detection/bluetoothradio/bluetoothradio_nosupport.c
++        src/detection/codec/codec_aros.c
++        src/detection/disk/disk_aros.c
++        src/detection/dns/dns_aros.c
++        src/detection/physicaldisk/physicaldisk_nosupport.c
++        src/detection/physicalmemory/physicalmemory_nosupport.c
++        src/detection/diskio/diskio_nosupport.c
++        src/detection/displayserver/displayserver_aros.c
++        src/detection/font/font_aros.c
++        src/detection/gpu/gpu_aros.c
++        src/detection/gtk_qt/gtk.c
++        src/detection/host/host_nosupport.c
++        src/detection/icons/icons_nosupport.c
++        src/detection/initsystem/initsystem_aros.c
++        src/detection/keyboard/keyboard_nosupport.c
++        src/detection/libc/libc_nosupport.c
++        src/detection/lm/lm_nosupport.c
++        src/detection/loadavg/loadavg_nosupport.c
++        src/detection/locale/locale_aros.c
++        src/detection/localip/localip_aros.c
++        src/detection/gamepad/gamepad_nosupport.c
++        src/detection/media/media_aros.c
++        src/detection/memory/memory_aros.c
++        src/detection/mouse/mouse_nosupport.c
++        src/detection/netio/netio_nosupport.c
++        src/detection/opengl/opengl_aros.c
++        src/detection/os/os_aros.c
++        src/detection/packages/packages_aros.c
++        src/detection/poweradapter/poweradapter_nosupport.c
++        src/detection/processes/processes_aros.c
++        src/detection/gtk_qt/qt.c
++        src/detection/sound/sound_aros.c
++        src/detection/swap/swap_aros.c
++        src/detection/terminalfont/terminalfont_aros.c
++        src/detection/terminalshell/terminalshell_aros.c
++        src/detection/terminalsize/terminalsize_aros.c
++        src/detection/theme/theme_nosupport.c
++        src/detection/top/top_aros.c
++        src/detection/tpm/tpm_nosupport.c
++        src/detection/uptime/uptime_aros.c
++        src/detection/users/users_aros.c
++        src/detection/wallpaper/wallpaper_aros.c
++        src/detection/wifi/wifi_nosupport.c
++        src/detection/wm/wm_nosupport.c
++        src/detection/de/de_aros.c
++        src/detection/wmtheme/wmtheme_aros.c
++        src/detection/camera/camera_nosupport.c
++    )
++    # The Limpet SDK: what the console behind the output renders
++    # (FF_AROS_LIMPET_SDK, the vendored copy in the port repository).
++    if(NOT FF_AROS_LIMPET_SDK)
++        message(FATAL_ERROR "Set FF_AROS_LIMPET_SDK to the Limpet SDK (include/, src/)")
++    endif()
++    list(APPEND LIBFASTFETCH_SRC
++        ${FF_AROS_LIMPET_SDK}/src/limpet_query.c
++        ${FF_AROS_LIMPET_SDK}/src/limpet_format.c
++    )
++    list(REMOVE_ITEM LIBFASTFETCH_SRC src/common/impl/genconfig.c)
++    if(FF_AROS_TARGET MATCHES "-abiv11-")
++        list(APPEND LIBFASTFETCH_SRC src/common/aros/aros_compat_abiv11.c)
++    endif()
+ elseif(GNU)
+     list(APPEND LIBFASTFETCH_SRC
+         src/common/impl/dbus.c
+@@ -1645,6 +1751,24 @@ elseif(NetBSD)
+     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-rpath,/usr/X11R7/lib -Wl,-rpath,/usr/pkg/lib") # ditto
+ elseif(Haiku)
+     target_compile_definitions(libfastfetch PUBLIC _GNU_SOURCE)
++elseif(AROS)
++    # _BSD_SOURCE: the BSD types AROSTCP's net/ headers use. No dlopen.
++    target_compile_definitions(libfastfetch PUBLIC _GNU_SOURCE _BSD_SOURCE PATH_MAX=1024
++        IF_NAMESIZE=IFNAMSIZ FF_DISABLE_DLOPEN
++        FF_HAVE_NO_GL) # the SDK has EGL headers, but the OpenGL module is not supported here
++    if(FF_AROS_TARGET)
++        target_compile_definitions(libfastfetch PUBLIC FF_AROS_TARGET="${FF_AROS_TARGET}")
++    endif()
++    target_include_directories(libfastfetch PUBLIC ${FF_AROS_LIMPET_SDK}/include)
++    # Every write to stdout goes through the AROS output filter
++    # (src/common/aros/aros_output.h): it maps ANSI colours to what the
++    # console behind the output says it shows.
++    target_compile_options(libfastfetch PUBLIC
++        "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/src/common/aros/aros_output.h")
++    if(FF_AROS_TARGET MATCHES "-abiv11-")
++        target_compile_options(libfastfetch PUBLIC
++            "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/src/common/aros/aros_compat_abiv11.h")
++    endif()
+ elseif(GNU)
+     # On Hurd PATH_MAX is not defined. Set an arbitrary limit as workaround.
+     target_compile_definitions(libfastfetch PUBLIC _GNU_SOURCE PATH_MAX=4096 O_PATH=O_NORW)
+diff --git a/src/common/aros/aros_compat_abiv11.c b/src/common/aros/aros_compat_abiv11.c
+new file mode 100644
+index 0000000..e44b99c
+--- /dev/null
++++ b/src/common/aros/aros_compat_abiv11.c
+@@ -0,0 +1,67 @@
++#include "aros_compat_abiv11.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stdarg.h>
++#include <stdlib.h>
++#include <string.h>
++#include <unistd.h>
++
++static int direct(int dirfd, const char* path) {
++    return dirfd == AT_FDCWD || strchr(path, ':') != NULL;
++}
++
++int ffArosOpenat(int dirfd, const char* path, int flags, ...) {
++    if (!direct(dirfd, path)) {
++        errno = ENOSYS;
++        return -1;
++    }
++    va_list ap;
++    va_start(ap, flags);
++    int mode = (flags & O_CREAT) ? va_arg(ap, int) : 0;
++    va_end(ap);
++    return open(path, flags, mode);
++}
++
++int ffArosFstatat(int dirfd, const char* path, struct stat* st, [[maybe_unused]] int flags) {
++    if (!direct(dirfd, path)) {
++        errno = ENOSYS;
++        return -1;
++    }
++    return stat(path, st);
++}
++
++DIR* ffArosFdopendir([[maybe_unused]] int fd) {
++    errno = ENOSYS;
++    return NULL;
++}
++
++ssize_t ffArosGetline(char** line, size_t* size, FILE* stream) {
++    if (!line || !size || !stream) {
++        errno = EINVAL;
++        return -1;
++    }
++    size_t length = 0;
++    int c;
++    while ((c = fgetc(stream)) != EOF) {
++        if (length + 2 > *size) {
++            size_t grown = *size ? *size * 2 : 128;
++            char* p = realloc(*line, grown);
++            if (!p) {
++                errno = ENOMEM;
++                return -1;
++            }
++            *line = p;
++            *size = grown;
++        }
++        (*line)[length++] = (char) c;
++        if (c == '\n') {
++            break;
++        }
++    }
++    if (length == 0) {
++        return -1;
++    }
++    (*line)[length] = '\0';
++    return (ssize_t) length;
++}
+diff --git a/src/common/aros/aros_compat_abiv11.h b/src/common/aros/aros_compat_abiv11.h
+new file mode 100644
+index 0000000..f2ba12f
+--- /dev/null
++++ b/src/common/aros/aros_compat_abiv11.h
+@@ -0,0 +1,35 @@
++#pragma once
++
++// ABIv11's C library lacks POSIX calls the shared code uses; mainline v1
++// has them. Included into every file of the ABIv11 build only.
++//  - O_CLOEXEC, O_DIRECTORY: no exec() to close across, no flag for
++//    directories: 0.
++//  - openat, fstatat: only AT_FDCWD or a name with a volume ("SYS:x"),
++//    which is all the AROS backend passes; any other ENOSYS.
++//  - fdopendir: ENOSYS (a directory cannot be opened as a descriptor).
++//  - getline: implemented (aros_compat_abiv11.c).
++
++#include <stdio.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <dirent.h>
++
++#ifndef O_CLOEXEC
++    #define O_CLOEXEC 0
++#endif
++#ifndef O_DIRECTORY
++    #define O_DIRECTORY 0
++#endif
++#ifndef AT_FDCWD
++    #define AT_FDCWD (-100)
++#endif
++
++int ffArosOpenat(int dirfd, const char* path, int flags, ...);
++int ffArosFstatat(int dirfd, const char* path, struct stat* st, int flags);
++DIR* ffArosFdopendir(int fd);
++ssize_t ffArosGetline(char** line, size_t* size, FILE* stream);
++
++#define openat ffArosOpenat
++#define fstatat ffArosFstatat
++#define fdopendir ffArosFdopendir
++#define getline ffArosGetline
+diff --git a/src/common/aros/aros_output.c b/src/common/aros/aros_output.c
+new file mode 100644
+index 0000000..e2dfbd8
+--- /dev/null
++++ b/src/common/aros/aros_output.c
+@@ -0,0 +1,298 @@
++// The stdout filter of aros_output.h. This file calls the real stdio
++// functions, so the macros of the forced include are removed first.
++#undef fwrite
++#undef fputs
++#undef fputc
++#undef putc
++#undef putchar
++#undef puts
++#undef printf
++#undef fprintf
++#undef vprintf
++#undef vfprintf
++#undef fflush
++
++#include "aros_output.h"
++#include "aros_terminal.h"
++
++#include <stdbool.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++// A sequence split across two writes is kept here until it ends. Longer
++// ones are not SGR colour sequences and are passed on as they are. So is a
++// UTF-8 character split across two writes, for a Latin-1 console.
++static struct {
++    enum { IN_TEXT, IN_ESCAPE, IN_CSI } state;
++    char sequence[64];
++    size_t length;
++    uint32_t scalar;
++    unsigned pending; // continuation bytes still to come
++} filter;
++
++static bool active(FILE* stream) {
++    return stream == stdout && (ffArosTerminalPens() || ffArosTerminalLatin1());
++}
++
++static void emit(const char* bytes, size_t length) {
++    if (length) {
++        fwrite(bytes, 1, length, stdout);
++    }
++}
++
++// sequence: "ESC [ params m". 30-37/40-47 and 90-97/100-107 become
++// 38;5;n / 48;5;n (n 0..15); 38;5;n, 38;2;r;g;b and their 48 forms are
++// copied with their arguments, everything else unchanged.
++static void emitSgr(const char* sequence, size_t length) {
++    char out[192];
++    size_t o = 0;
++    const char* p = sequence + 2;
++    const char* end = sequence + length - 1;
++    memcpy(out, "\033[", 2);
++    o = 2;
++    int skip = 0; // arguments of a 38/48 still to copy unchanged
++    while (p <= end && o < sizeof(out) - 16) {
++        const char* q = p;
++        while (q < end && *q != ';' && *q != ':') {
++            ++q;
++        }
++        char param[16];
++        size_t n = (size_t) (q - p) < sizeof(param) - 1 ? (size_t) (q - p) : sizeof(param) - 1;
++        memcpy(param, p, n);
++        param[n] = 0;
++        char* tail;
++        long v = strtol(param, &tail, 10);
++        bool number = n > 0 && *tail == 0;
++        if (skip > 0) {
++            if (skip == 99) { // the selector after 38/48: 5 has one more, 2 three more
++                skip = number && v == 2 ? 3 : number && v == 5 ? 1 : 0;
++            } else {
++                --skip;
++            }
++            memcpy(out + o, param, n);
++            o += n;
++        } else if (number && ((v >= 30 && v <= 37) || (v >= 90 && v <= 97))) {
++            o += (size_t) snprintf(out + o, sizeof(out) - o, "38;5;%ld", v >= 90 ? v - 90 + 8 : v - 30);
++        } else if (number && ((v >= 40 && v <= 47) || (v >= 100 && v <= 107))) {
++            o += (size_t) snprintf(out + o, sizeof(out) - o, "48;5;%ld", v >= 100 ? v - 100 + 8 : v - 40);
++        } else {
++            if (number && (v == 38 || v == 48)) {
++                skip = 99;
++            }
++            memcpy(out + o, param, n);
++            o += n;
++        }
++        if (q < end) {
++            out[o++] = *q;
++        }
++        p = q + 1;
++    }
++    if (o >= sizeof(out) - 16) { // unexpectedly long: leave it as it was
++        emit(sequence, length);
++        return;
++    }
++    out[o++] = 'm';
++    emit(out, o);
++}
++
++// A character outside Latin-1 as the nearest ASCII, else '?'.
++static void emitScalar(uint32_t scalar) {
++    char c = '?';
++    const char* s = nullptr;
++    if (scalar < 0x100) {
++        c = (char) scalar;
++    } else if (scalar == 0x2010 || scalar == 0x2011 || scalar == 0x2013 || scalar == 0x2014 || scalar == 0x2212) {
++        c = '-';
++    } else if (scalar == 0x2018 || scalar == 0x2019) {
++        c = '\'';
++    } else if (scalar == 0x201C || scalar == 0x201D) {
++        c = '"';
++    } else if (scalar == 0x2022) {
++        c = (char) 0xB7; // middle dot
++    } else if (scalar == 0x2026) {
++        s = "...";
++    } else if (scalar == 0x2713 || scalar == 0x2714) {
++        c = '*'; // check mark
++    }
++    if (s) {
++        emit(s, strlen(s));
++    } else {
++        emit(&c, 1);
++    }
++}
++
++// One byte of text at or above 0x80, for a Latin-1 console.
++static void latin1Byte(unsigned char b) {
++    if (filter.pending && (b & 0xC0) == 0x80) {
++        filter.scalar = (filter.scalar << 6) | (b & 0x3F);
++        if (--filter.pending == 0) {
++            emitScalar(filter.scalar);
++        }
++        return;
++    }
++    if (filter.pending) { // a sequence cut short
++        filter.pending = 0;
++        emit("?", 1);
++    }
++    if ((b & 0xE0) == 0xC0) {
++        filter.scalar = b & 0x1F;
++        filter.pending = 1;
++    } else if ((b & 0xF0) == 0xE0) {
++        filter.scalar = b & 0x0F;
++        filter.pending = 2;
++    } else if ((b & 0xF8) == 0xF0) {
++        filter.scalar = b & 0x07;
++        filter.pending = 3;
++    } else {
++        emit("?", 1);
++    }
++}
++
++static void filterBytes(const char* bytes, size_t length) {
++    size_t start = 0;
++    bool latin1 = ffArosTerminalLatin1();
++    bool pens = ffArosTerminalPens();
++    for (size_t i = 0; i < length; ++i) {
++        char c = bytes[i];
++        switch (filter.state) {
++            case IN_TEXT:
++                if (latin1 && ((unsigned char) c & 0x80)) {
++                    emit(bytes + start, i - start);
++                    start = i + 1;
++                    latin1Byte((unsigned char) c);
++                    break;
++                }
++                if (filter.pending) { // ASCII cuts a sequence short; the range before it is empty
++                    filter.pending = 0;
++                    emit("?", 1);
++                }
++                if (c == '\033') {
++                    emit(bytes + start, i - start);
++                    filter.state = IN_ESCAPE;
++                    filter.sequence[0] = c;
++                    filter.length = 1;
++                }
++                break;
++            case IN_ESCAPE:
++                filter.sequence[filter.length++] = c;
++                if (c == '[') {
++                    filter.state = IN_CSI;
++                } else {
++                    emit(filter.sequence, filter.length);
++                    filter.state = IN_TEXT;
++                    start = i + 1;
++                }
++                break;
++            case IN_CSI:
++                filter.sequence[filter.length++] = c;
++                if (c >= 0x40 && c <= 0x7e) { // final byte
++                    if (c == 'm' && pens) {
++                        emitSgr(filter.sequence, filter.length);
++                    } else {
++                        emit(filter.sequence, filter.length);
++                    }
++                    filter.state = IN_TEXT;
++                    start = i + 1;
++                } else if (filter.length == sizeof(filter.sequence)) {
++                    emit(filter.sequence, filter.length);
++                    filter.state = IN_TEXT;
++                    start = i + 1;
++                }
++                break;
++        }
++    }
++    if (filter.state == IN_TEXT) {
++        emit(bytes + start, length - start);
++    }
++}
++
++size_t ffArosFwrite(const void* ptr, size_t size, size_t count, FILE* stream) {
++    if (!active(stream) || !size || !count) {
++        return fwrite(ptr, size, count, stream);
++    }
++    filterBytes((const char*) ptr, size * count);
++    return ferror(stdout) ? 0 : count;
++}
++
++int ffArosFputs(const char* s, FILE* stream) {
++    if (!active(stream)) {
++        return fputs(s, stream);
++    }
++    filterBytes(s, strlen(s));
++    return ferror(stdout) ? EOF : 0;
++}
++
++int ffArosPutc(int c, FILE* stream) {
++    if (!active(stream)) {
++        return fputc(c, stream);
++    }
++    char b = (char) c;
++    filterBytes(&b, 1);
++    return ferror(stdout) ? EOF : (unsigned char) c;
++}
++
++int ffArosPuts(const char* s) {
++    if (ffArosFputs(s, stdout) == EOF) {
++        return EOF;
++    }
++    return ffArosPutc('\n', stdout) == EOF ? EOF : 0;
++}
++
++int ffArosVfprintf(FILE* stream, const char* format, va_list ap) {
++    if (!active(stream)) {
++        return vfprintf(stream, format, ap);
++    }
++    char small[512];
++    va_list copy;
++    va_copy(copy, ap);
++    int n = vsnprintf(small, sizeof(small), format, ap);
++    if (n < 0) {
++        va_end(copy);
++        return n;
++    }
++    if ((size_t) n < sizeof(small)) {
++        filterBytes(small, (size_t) n);
++    } else {
++        char* big = malloc((size_t) n + 1);
++        if (!big) {
++            va_end(copy);
++            return -1;
++        }
++        vsnprintf(big, (size_t) n + 1, format, copy);
++        filterBytes(big, (size_t) n);
++        free(big);
++    }
++    va_end(copy);
++    return ferror(stdout) ? -1 : n;
++}
++
++int ffArosPrintf(const char* format, ...) {
++    va_list ap;
++    va_start(ap, format);
++    int n = ffArosVfprintf(stdout, format, ap);
++    va_end(ap);
++    return n;
++}
++
++int ffArosFprintf(FILE* stream, const char* format, ...) {
++    va_list ap;
++    va_start(ap, format);
++    int n = ffArosVfprintf(stream, format, ap);
++    va_end(ap);
++    return n;
++}
++
++int ffArosFflush(FILE* stream) {
++    // A sequence still open at a flush is incomplete; it goes out as it
++    // is rather than being held back.
++    if ((stream == stdout || stream == nullptr) && filter.state != IN_TEXT) {
++        emit(filter.sequence, filter.length);
++        filter.state = IN_TEXT;
++    }
++    if ((stream == stdout || stream == nullptr) && filter.pending) {
++        filter.pending = 0;
++        emit("?", 1);
++    }
++    return fflush(stream);
++}
+diff --git a/src/common/aros/aros_output.h b/src/common/aros/aros_output.h
+new file mode 100644
+index 0000000..c79796f
+--- /dev/null
++++ b/src/common/aros/aros_output.h
+@@ -0,0 +1,42 @@
++#pragma once
++
++// Included into every source file of the AROS build (CMakeLists.txt).
++// All stdio writes to stdout pass through one filter, for two kinds of
++// console (aros_terminal.h):
++// - one that reports Amiga pens (XTY_COLOR_PENS, Limpet's Shell sessions)
++//   shows screen pens 0..7 for SGR 30..37 and 40..47, which fastfetch
++//   writes from many places: those become 38;5;n / 48;5;n, which keep
++//   their ANSI meaning there;
++// - one that shows Latin-1 (CON:) gets UTF-8 text as ISO-8859-1, with '?'
++//   or an ASCII stand-in for what Latin-1 lacks.
++// Writes to other streams, and to stdout redirected to a file or pipe, are
++// passed on unchanged.
++
++#include <stdio.h>
++#include <stdarg.h>
++
++size_t ffArosFwrite(const void* ptr, size_t size, size_t count, FILE* stream);
++int ffArosFputs(const char* s, FILE* stream);
++int ffArosPutc(int c, FILE* stream);
++int ffArosPuts(const char* s);
++int ffArosPrintf(const char* format, ...) __attribute__((__format__(__printf__, 1, 2)));
++int ffArosFprintf(FILE* stream, const char* format, ...) __attribute__((__format__(__printf__, 2, 3)));
++int ffArosVfprintf(FILE* stream, const char* format, va_list ap) __attribute__((__format__(__printf__, 2, 0)));
++int ffArosFflush(FILE* stream);
++
++#ifndef FF_AROS_OUTPUT_IMPL
++    #undef putc
++    #undef putchar
++    #undef fputc
++    #define fwrite(p, s, n, f) ffArosFwrite((p), (s), (n), (f))
++    #define fputs(s, f) ffArosFputs((s), (f))
++    #define fputc(c, f) ffArosPutc((c), (f))
++    #define putc(c, f) ffArosPutc((c), (f))
++    #define putchar(c) ffArosPutc((c), stdout)
++    #define puts(s) ffArosPuts(s)
++    #define printf(...) ffArosPrintf(__VA_ARGS__)
++    #define fprintf(f, ...) ffArosFprintf((f), __VA_ARGS__)
++    #define vprintf(fmt, ap) ffArosVfprintf(stdout, (fmt), (ap))
++    #define vfprintf(f, fmt, ap) ffArosVfprintf((f), (fmt), (ap))
++    #define fflush(f) ffArosFflush(f)
++#endif
+diff --git a/src/common/aros/aros_sleep.c b/src/common/aros/aros_sleep.c
+new file mode 100644
+index 0000000..dbcd02f
+--- /dev/null
++++ b/src/common/aros/aros_sleep.c
+@@ -0,0 +1,17 @@
++#include "aros_sleep.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dos.h>
++
++bool ffArosSleep(uint32_t msec) {
++    // Delay() counts ticks of 1/50 s; one at a time, so that Ctrl-C ends
++    // the wait within a tick.
++    for (uint32_t ticks = (msec + 19) / 20; ticks > 0; --ticks) {
++        if (SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C) {
++            return false;
++        }
++        Delay(1);
++    }
++    return !(SetSignal(0, SIGBREAKF_CTRL_C) & SIGBREAKF_CTRL_C);
++}
+diff --git a/src/common/aros/aros_sleep.h b/src/common/aros/aros_sleep.h
+new file mode 100644
+index 0000000..5068886
+--- /dev/null
++++ b/src/common/aros/aros_sleep.h
+@@ -0,0 +1,9 @@
++#pragma once
++
++#include <stdbool.h>
++#include <stdint.h>
++
++// Sleep for msec; false when Ctrl-C arrived meanwhile (the signal is taken).
++// On AROS Ctrl-C is the task's SIGBREAKF_CTRL_C, not a POSIX SIGINT, so the
++// handler fastfetch installs for SIGINT never runs.
++bool ffArosSleep(uint32_t msec);
+diff --git a/src/common/aros/aros_terminal.c b/src/common/aros/aros_terminal.c
+new file mode 100644
+index 0000000..f0f956c
+--- /dev/null
++++ b/src/common/aros/aros_terminal.c
+@@ -0,0 +1,86 @@
++// The real fflush: this file runs before the first write and must not
++// recurse into the output filter.
++#undef fflush
++#include "aros_terminal.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dosextens.h>
++#include <stdio.h>
++#include <string.h>
++
++static struct {
++    bool asked;
++    bool answered;
++    bool named;
++    LimpetPresentation presentation;
++    LimpetIdentity identity;
++    char handler[64];
++} state;
++
++static void ask(void) {
++    if (state.asked) {
++        return;
++    }
++    state.asked = true;
++    BPTR output = Output();
++    if (!output) {
++        return;
++    }
++    // The packet is not ordered behind text still in stdio's buffer.
++    fflush(stdout);
++    state.answered = limpet_query_presentation(output, &state.presentation, nullptr) == LIMPET_OK;
++    if (state.answered) {
++        state.named = limpet_query_identity(output, &state.identity, nullptr) == LIMPET_OK &&
++                      (state.identity.known & XTY_IDENTITY_KNOWN_NAME);
++    }
++    if (IsInteractive(output)) {
++        struct FileHandle* fh = BADDR(output);
++        struct MsgPort* port = fh->fh_Type;
++        Forbid();
++        if (port && (port->mp_Flags & PF_ACTION) == PA_SIGNAL && port->mp_SigTask &&
++            ((struct Task*) port->mp_SigTask)->tc_Node.ln_Name) {
++            const char* name = ((struct Task*) port->mp_SigTask)->tc_Node.ln_Name;
++            strncpy(state.handler, name, sizeof(state.handler) - 1);
++        }
++        Permit();
++    }
++}
++
++const LimpetPresentation* ffArosTerminalPresentation(void) {
++    ask();
++    return state.answered ? &state.presentation : nullptr;
++}
++
++bool ffArosTerminalPlain(void) {
++    ask();
++    return !state.answered || limpet_color_level(&state.presentation) < XTY_COLOR_ANSI16;
++}
++
++bool ffArosTerminalUtf8(void) {
++    ask();
++    return state.answered && limpet_text_utf8(&state.presentation);
++}
++
++bool ffArosTerminalLatin1(void) {
++    ask();
++    if (!state.answered) {
++        return state.handler[0] != 0;
++    }
++    return (state.presentation.known & XTY_PRESENT_KNOWN_TEXT) && !limpet_text_utf8(&state.presentation);
++}
++
++bool ffArosTerminalPens(void) {
++    ask();
++    return state.answered && limpet_uses_pens(&state.presentation);
++}
++
++const LimpetIdentity* ffArosTerminalIdentity(void) {
++    ask();
++    return state.named ? &state.identity : nullptr;
++}
++
++const char* ffArosTerminalHandlerTask(void) {
++    ask();
++    return state.handler;
++}
+diff --git a/src/common/aros/aros_terminal.h b/src/common/aros/aros_terminal.h
+new file mode 100644
+index 0000000..6902f5c
+--- /dev/null
++++ b/src/common/aros/aros_terminal.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++// What the console behind the output says it renders, asked once through
++// the Limpet SDK's presentation query on the actual output FileHandle
++// (Output()), never inferred from a terminal's name or from environment
++// variables, which a child of one console inherits into another.
++
++#include <limpet/limpet.h>
++#include <stdbool.h>
++#include <stddef.h>
++
++// The decoded reply, or nullptr when the console answered nothing (CON:,
++// another console, a file or a pipe): then nothing is known about it.
++const LimpetPresentation* ffArosTerminalPresentation(void);
++// Plain text without any escape sequence: the console did not confirm
++// colours, or the output is not a console.
++bool ffArosTerminalPlain(void);
++// The console confirmed UTF-8 decoding.
++bool ffArosTerminalUtf8(void);
++// Text for this console must be ISO-8859-1: an interactive console that did
++// not answer the query (CON: and other Amiga consoles draw each byte from a
++// Latin-1 font), or one that said it does not decode UTF-8. A terminal that
++// answered without the text bits (Limpet before 0.8.0) is not known to lack
++// UTF-8 and is written UTF-8, as is anything that is not a console.
++bool ffArosTerminalLatin1(void);
++// SGR 30..37/40..47 select Amiga screen pens there (XTY_COLOR_PENS).
++bool ffArosTerminalPens(void);
++// The terminal's name and version (operation 14), or nullptr.
++const LimpetIdentity* ffArosTerminalIdentity(void);
++// Name of the task that handles the output's console, e.g. "CON"; "" if
++// the output is not a console. Not a capability: for the Terminal module.
++const char* ffArosTerminalHandlerTask(void);
+diff --git a/src/common/aros/aros_version.c b/src/common/aros/aros_version.c
+new file mode 100644
+index 0000000..2ece21f
+--- /dev/null
++++ b/src/common/aros/aros_version.c
+@@ -0,0 +1,72 @@
++#include "aros_version.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dosextens.h>
++#include <string.h>
++
++static bool isDigit(char c) {
++    return c >= '0' && c <= '9';
++}
++
++bool ffArosParseVersion(const char* text, size_t length, FFstrbuf* version) {
++    const char* p = text;
++    const char* end = text + length;
++    while (p < end && *p != '\0' && *p != '\n' && *p != '\r' && *p != '(') {
++        while (p < end && *p == ' ') {
++            ++p;
++        }
++        const char* word = p;
++        while (p < end && *p != ' ' && *p != '\0' && *p != '\n' && *p != '\r' && *p != '(') {
++            ++p;
++        }
++        // "1.2" or "41": digits and dots only, starting with a digit.
++        const char* q = word;
++        while (q < p && (isDigit(*q) || *q == '.')) {
++            ++q;
++        }
++        if (q == p && p > word && isDigit(*word)) {
++            while (p > word && p[-1] == '.') {
++                --p;
++            }
++            ffStrbufSetNS(version, (uint32_t) (p - word), word);
++            return true;
++        }
++    }
++    return false;
++}
++
++bool ffArosFileVersion(const char* path, FFstrbuf* version) {
++    struct Process* me = (struct Process*) FindTask(nullptr);
++    APTR window = me->pr_WindowPtr;
++    me->pr_WindowPtr = (APTR) -1; // no "insert volume" requester
++    BPTR file = Open((CONST_STRPTR) path, MODE_OLDFILE);
++    me->pr_WindowPtr = window;
++    if (!file) {
++        return false;
++    }
++    enum { KEEP = 128 };
++    static char buffer[8192 + KEEP];
++    size_t kept = 0;
++    bool found = false;
++    for (LONG total = 0; !found && total < (1 << 20);) {
++        LONG n = Read(file, buffer + kept, (LONG) (sizeof(buffer) - kept));
++        bool last = n <= 0;
++        size_t length = kept + (last ? 0 : (size_t) n);
++        total += last ? 0 : n;
++        for (size_t i = 0; i + 5 <= length && !found; ++i) {
++            // A string cut by the end of this read is parsed from the kept
++            // tail after the next one; at the end of the file it is whole.
++            if (memcmp(buffer + i, "$VER:", 5) == 0 && (last || length - i >= KEEP)) {
++                found = ffArosParseVersion(buffer + i + 5, length - i - 5, version);
++            }
++        }
++        if (last) {
++            break;
++        }
++        kept = length < KEEP ? length : KEEP;
++        memmove(buffer, buffer + length - kept, kept);
++    }
++    Close(file);
++    return found;
++}
+diff --git a/src/common/aros/aros_version.h b/src/common/aros/aros_version.h
+new file mode 100644
+index 0000000..b7f3bf2
+--- /dev/null
++++ b/src/common/aros/aros_version.h
+@@ -0,0 +1,15 @@
++#pragma once
++
++#include "common/FFstrbuf.h"
++#include <stdbool.h>
++#include <stddef.h>
++
++// The version in an AROS version string such as "$VER: name 1.2 (date)" or
++// a module's id string "name 41.4 (date)": the first word of
++// digits and dots, before the date in parentheses. The name may be absent,
++// contain spaces or be preceded by more than one space ("$VER:  Wanderer
++// 1.7", mainline and AROS One). Sets version to "1.2".
++bool ffArosParseVersion(const char* text, size_t length, FFstrbuf* version);
++// The same, read from a program file's "$VER: " string (the first 1 MiB
++// at most), never by running it: "name --version" would start the program.
++bool ffArosFileVersion(const char* path, FFstrbuf* version);
+diff --git a/src/common/aros/genconfig_aros.c b/src/common/aros/genconfig_aros.c
+new file mode 100644
+index 0000000..03b817c
+--- /dev/null
++++ b/src/common/aros/genconfig_aros.c
+@@ -0,0 +1,8 @@
++#include "common/genconfig.h"
++
++// The interactive editor (genconfig.c) needs a raw-mode tty, poll() and
++// SIGWINCH, none of which AROS has; fastfetch.c never selects it there,
++// and --gen-config writes the file directly.
++bool ffGenConfigInteractive([[maybe_unused]] FFdata* data) {
++    return false;
++}
+diff --git a/src/common/impl/FFPlatform_aros.c b/src/common/impl/FFPlatform_aros.c
+new file mode 100644
+index 0000000..feaba22
+--- /dev/null
++++ b/src/common/impl/FFPlatform_aros.c
+@@ -0,0 +1,110 @@
++#include "FFPlatform_private.h"
++#include "common/FFstrbuf.h"
++#include "common/io.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dosextens.h>
++#include <exec/execbase.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/utsname.h>
++
++// AmigaDOS names: "Vol:" is a volume's root and "Dir/" a drawer, so a
++// separator is added only after a drawer. "Vol:/" would be the parent of
++// the root, which does not exist.
++static void ensureDir(FFstrbuf* path) {
++    if (path->length && !ffStrbufEndsWithC(path, ':') && !ffStrbufEndsWithC(path, '/')) {
++        ffStrbufAppendC(path, '/');
++    }
++}
++
++static void addDir(FFlist* dirs, const char* path) {
++    APTR window = ((struct Process*) FindTask(nullptr))->pr_WindowPtr;
++    ((struct Process*) FindTask(nullptr))->pr_WindowPtr = (APTR) -1; // no "insert volume" requester
++    BPTR lock = Lock((CONST_STRPTR) path, ACCESS_READ);
++    ((struct Process*) FindTask(nullptr))->pr_WindowPtr = window;
++    if (!lock) {
++        return;
++    }
++    UnLock(lock);
++    FF_STRBUF_AUTO_DESTROY buffer = ffStrbufCreateS(path);
++    ensureDir(&buffer);
++    if (!FF_LIST_CONTAINS(*dirs, &buffer, ffStrbufEqual)) {
++        ffStrbufInitMove(FF_LIST_ADD(FFstrbuf, *dirs), &buffer);
++    }
++}
++
++static void nameOfLock(BPTR lock, FFstrbuf* out) {
++    char name[1024];
++    if (lock && NameFromLock(lock, (STRPTR) name, sizeof(name))) {
++        ffStrbufSetS(out, name);
++        ensureDir(out);
++    }
++}
++
++// Mainline stdcio before upstream da9bbd01b5 (2026-09-24; the pool's
++// mainline of 2026-09-23 among them) drops what is still in stdout's buffer
++// when the program ends with output redirected to a file: a short listing
++// came out empty, a longer one cut at a 4096-byte boundary. An explicit
++// flush before the C library closes its streams keeps it.
++static void flushStdout(void) {
++    fflush(stdout);
++}
++
++void ffPlatformInitImpl(FFPlatform* platform) {
++    atexit(flushStdout);
++
++    // AROS has no home directory. User settings live in ENVARC: (kept) and
++    // ENV: (this session's copy, made from ENVARC: at boot); fastfetch's
++    // own files beside the program. ENVARC: comes first: --gen-config
++    // writes into the first directory, and a file only in ENV: would be
++    // gone after the next boot.
++    ffStrbufSetStatic(&platform->homeDir, "ENVARC:");
++    ffStrbufSetStatic(&platform->cacheDir, "T:");
++
++    addDir(&platform->configDirs, "ENVARC:");
++    addDir(&platform->configDirs, "ENV:");
++    addDir(&platform->configDirs, "PROGDIR:");
++
++    nameOfLock(GetProgramDir(), &platform->exePath);
++    if (platform->exePath.length) {
++        char program[256];
++        if (GetProgramName((STRPTR) program, sizeof(program))) {
++            ffStrbufAppendS(&platform->exePath, (const char*) FilePart((STRPTR) program));
++        }
++    }
++    // Presets and logos: PROGDIR:share/fastfetch/..., as on other systems.
++    addDir(&platform->dataDirs, "PROGDIR:share");
++
++    nameOfLock(((struct Process*) FindTask(nullptr))->pr_CurrentDir, &platform->cwd);
++
++    struct CommandLineInterface* cli = Cli();
++    platform->pid = cli ? (uint32_t) ((struct Process*) FindTask(nullptr))->pr_TaskNum : 0;
++    platform->uid = 0;
++
++    // A single-user system: a name only when the user has set one.
++    const char* user = getenv("USER");
++    if (user && *user) {
++        ffStrbufSetS(&platform->userName, user);
++    }
++
++    struct utsname u;
++    if (uname(&u) == 0) {
++        ffStrbufSetS(&platform->hostName, u.nodename);
++        ffStrbufSetS(&platform->sysinfo.version, u.version);
++    }
++    ffStrbufSetStatic(&platform->userShell, "Shell");
++
++    // The kernel is exec.library; its version is what changes with it.
++    ffStrbufSetStatic(&platform->sysinfo.name, "AROS");
++    ffStrbufSetF(&platform->sysinfo.release, "%u.%u", (unsigned) SysBase->LibNode.lib_Version,
++                 (unsigned) SysBase->LibNode.lib_Revision);
++#if defined(__x86_64__)
++    ffStrbufSetStatic(&platform->sysinfo.architecture, "x86_64");
++#elif defined(__aarch64__)
++    ffStrbufSetStatic(&platform->sysinfo.architecture, "aarch64");
++#endif
++    platform->sysinfo.pageSizeShift = 12;
++}
+diff --git a/src/common/impl/binary_aros.c b/src/common/impl/binary_aros.c
+new file mode 100644
+index 0000000..95f5ace
+--- /dev/null
++++ b/src/common/impl/binary_aros.c
+@@ -0,0 +1,25 @@
++#include "common/binary.h"
++#include "common/io.h"
++
++#include <stdio.h>
++
++// Printable runs in a file, the way `strings` finds them: there is no ELF
++// section reader on AROS, so the whole file is scanned.
++const char* ffBinaryExtractStrings(const char* file, bool (*cb)(const char* str, uint32_t len, void* userdata), void* userdata, uint32_t minLength) {
++    FF_STRBUF_AUTO_DESTROY content = ffStrbufCreate();
++    if (!ffAppendFileBuffer(file, &content)) {
++        return "Failed to read the file";
++    }
++    uint32_t start = 0;
++    for (uint32_t i = 0; i <= content.length; ++i) {
++        unsigned char c = i < content.length ? (unsigned char) content.chars[i] : 0;
++        if (c >= 0x20 && c < 0x7f) {
++            continue;
++        }
++        if (i - start >= minLength && !cb(content.chars + start, i - start, userdata)) {
++            break;
++        }
++        start = i + 1;
++    }
++    return nullptr;
++}
+diff --git a/src/common/impl/io_unix.c b/src/common/impl/io_unix.c
+index 2bd8aba..7981a2e 100644
+--- a/src/common/impl/io_unix.c
++++ b/src/common/impl/io_unix.c
+@@ -8,7 +8,9 @@
+ #include <termios.h>
+ #include <dirent.h>
+ #include <errno.h>
+-#ifndef __APPLE__
++#if defined(__AROS__)
++    // No poll(); terminal queries over /dev/tty do not exist on AROS.
++#elif !defined(__APPLE__)
+     #include <poll.h>
+ #else
+     #include <sys/select.h>
+@@ -150,6 +152,12 @@ void restoreTerm(void) {
+ }
+ 
+ const char* ffGetTerminalResponse(const char* request, int nParams, const char* format, ...) {
++#ifdef __AROS__
++    // There is no /dev/tty; what a console renders comes from its
++    // presentation reply (common/aros/aros_terminal.h).
++    FF_UNUSED(request, nParams, format)
++    return "Terminal queries are not supported on AROS";
++#endif
+     if (ftty < 0) {
+         ftty = open("/dev/tty", O_RDWR | O_NOCTTY | O_CLOEXEC);
+         if (ftty < 0) {
+@@ -174,7 +182,8 @@ const char* ffGetTerminalResponse(const char* request, int nParams, const char*
+     ffWriteFDData(ftty, strlen(request), request);
+ 
+ // Give the terminal some time to respond
+-#ifndef __APPLE__
++#if defined(__AROS__)
++#elif !defined(__APPLE__)
+     const int pollResult = poll(&(struct pollfd) { .fd = ftty, .events = POLLIN }, 1, FF_IO_TERM_RESP_WAIT_MS);
+     if (pollResult <= 0) {
+         FF_DEBUG("poll(/dev/tty) returned %d after %d ms: %s",
+diff --git a/src/common/impl/netif_aros.c b/src/common/impl/netif_aros.c
+new file mode 100644
+index 0000000..580e2f0
+--- /dev/null
++++ b/src/common/impl/netif_aros.c
+@@ -0,0 +1,10 @@
++#include "common/netif.h"
++
++// AROSTCP's routing table is not read yet.
++bool ffNetifGetDefaultRouteImplV4([[maybe_unused]] FFNetifDefaultRouteResult* result) {
++    return false;
++}
++
++bool ffNetifGetDefaultRouteImplV6([[maybe_unused]] FFNetifDefaultRouteResult* result) {
++    return false;
++}
+diff --git a/src/common/impl/networking_aros.c b/src/common/impl/networking_aros.c
+new file mode 100644
+index 0000000..48e52f6
+--- /dev/null
++++ b/src/common/impl/networking_aros.c
+@@ -0,0 +1,13 @@
++#include "common/networking.h"
++
++// HTTP requests (PublicIp, Weather) would need bsdsocket.library, opened
++// only when such a module runs; not implemented yet.
++const char* ffNetworkingSendHttpRequest([[maybe_unused]] FFNetworkingState* state, [[maybe_unused]] const char* host,
++                                        [[maybe_unused]] uint16_t port, [[maybe_unused]] const char* path,
++                                        [[maybe_unused]] const char* headers) {
++    return "Networking is not supported on AROS yet";
++}
++
++const char* ffNetworkingRecvHttpResponse([[maybe_unused]] FFNetworkingState* state, [[maybe_unused]] FFstrbuf* buffer) {
++    return "Networking is not supported on AROS yet";
++}
+diff --git a/src/common/impl/processing_aros.c b/src/common/impl/processing_aros.c
+new file mode 100644
+index 0000000..4df01ff
+--- /dev/null
++++ b/src/common/impl/processing_aros.c
+@@ -0,0 +1,105 @@
++#include "common/processing.h"
++#include "common/io.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dostags.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <unistd.h>
++
++// AROS has no fork, pipes between C programs or posix_spawn. A command runs
++// to completion through SystemTags with its output in a file in T:, which
++// ffProcessReadOutput reads and deletes. pid carries the return code.
++
++static bool appendQuoted(char* line, size_t size, size_t* length, const char* arg) {
++    // AROS Shell quoting: "..." with *" for a quote and ** for a star.
++    if (*length + 3 >= size) {
++        return false;
++    }
++    line[(*length)++] = '"';
++    for (const char* p = arg; *p; ++p) {
++        if (*length + 4 >= size) {
++            return false;
++        }
++        if (*p == '"' || *p == '*') {
++            line[(*length)++] = '*';
++        } else if (*p == '\n') {
++            return false;
++        }
++        line[(*length)++] = *p;
++    }
++    line[(*length)++] = '"';
++    line[(*length)++] = ' ';
++    line[*length] = '\0';
++    return true;
++}
++
++const char* ffProcessSpawn(char* const argv[], FFProcessOutputType useOutput, [[maybe_unused]] FFNativeFD stdinFd, FFProcessHandle* outHandle) {
++    char line[2048] = "";
++    size_t length = 0;
++    // The program name is not quoted: the Shell looks it up in its path.
++    if (!argv[0] || strlen(argv[0]) + 2 >= sizeof(line)) {
++        return "Command is too long";
++    }
++    length = (size_t) snprintf(line, sizeof(line), "%s ", argv[0]);
++    for (unsigned i = 1; argv[i]; ++i) {
++        if (!appendQuoted(line, sizeof(line), &length, argv[i])) {
++            return "Command is too long or contains a line feed";
++        }
++    }
++
++    char path[64];
++    snprintf(path, sizeof(path), "T:fastfetch-%p.out", (void*) FindTask(nullptr));
++    BPTR output = Open((CONST_STRPTR) path, MODE_NEWFILE);
++    if (!output) {
++        return "Cannot create the command's output file in T:";
++    }
++    BPTR input = Open((CONST_STRPTR) "NIL:", MODE_OLDFILE);
++    // Without the stdout bit the command's output goes to NIL:; AROS
++    // programs write errors to the same handle, so stderr follows stdout.
++    BPTR target = output;
++    BPTR nil = 0;
++    if (!(useOutput & FF_PROCESS_OUTPUT_STDOUT_BIT)) {
++        nil = Open((CONST_STRPTR) "NIL:", MODE_NEWFILE);
++        target = nil;
++    }
++    LONG rc = SystemTags((CONST_STRPTR) line, SYS_Input, (IPTR) input, SYS_Output, (IPTR) target,
++                         NP_StackSize, 65536, TAG_DONE);
++    if (rc == -1) {
++        // The handles were not taken over by a new process.
++        if (input) {
++            Close(input);
++        }
++        if (nil) {
++            Close(nil);
++        }
++        Close(output);
++        DeleteFile((CONST_STRPTR) path);
++        return "SystemTags() failed";
++    }
++    if (nil) {
++        Close(output);
++    }
++    outHandle->pid = (pid_t) rc;
++    outHandle->pipeRead = open(path, O_RDONLY);
++    DeleteFile((CONST_STRPTR) path); // the open descriptor keeps it readable on RAM: and SFS
++    if (outHandle->pipeRead < 0) {
++        return "Cannot read the command's output";
++    }
++    return nullptr;
++}
++
++const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
++    bool ok = ffAppendFDBuffer(handle->pipeRead, buffer);
++    close(handle->pipeRead);
++    handle->pipeRead = -1;
++    if (!ok) {
++        return "Reading the command's output failed";
++    }
++    if (handle->pid != 0) {
++        return "The command failed";
++    }
++    return nullptr;
++}
+diff --git a/src/common/netif.h b/src/common/netif.h
+index 75735f5..3cceeea 100644
+--- a/src/common/netif.h
++++ b/src/common/netif.h
+@@ -1,5 +1,11 @@
+ #pragma once
+ 
++#ifdef __AROS__
++    // AROSTCP's net/if.h expects the BSD headers before it.
++    #include <sys/types.h>
++    #include <sys/time.h>
++    #include <sys/socket.h>
++#endif
+ #include "fastfetch.h"
+ 
+ #ifndef _WIN32
+diff --git a/src/detection/codec/codec_aros.c b/src/detection/codec/codec_aros.c
+new file mode 100644
+index 0000000..43f78ae
+--- /dev/null
++++ b/src/detection/codec/codec_aros.c
+@@ -0,0 +1,5 @@
++#include "codec.h"
++
++const char* ffDetectCodecNative([[maybe_unused]] FFCodecOptions* options, [[maybe_unused]] FFlist* result) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/cpu/cpu_aros.c b/src/detection/cpu/cpu_aros.c
+new file mode 100644
+index 0000000..49040d0
+--- /dev/null
++++ b/src/detection/cpu/cpu_aros.c
+@@ -0,0 +1,36 @@
++#include "cpu.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/processor.h>
++#include <resources/processor.h>
++
++const char* ffDetectCPUImpl([[maybe_unused]] const FFCPUOptions* options, FFCPUResult* cpu) {
++    APTR ProcessorBase = OpenResource((CONST_STRPTR) PROCESSORNAME);
++    if (!ProcessorBase) {
++        return "processor.resource is unavailable";
++    }
++    ULONG count = 0;
++    CONST_STRPTR model = nullptr;
++    UQUAD speed = 0;
++    GetCPUInfoTags(GCIT_NumberOfProcessors, (IPTR) &count, TAG_DONE);
++    GetCPUInfoTags(GCIT_SelectedProcessor, 0, GCIT_ModelString, (IPTR) &model,
++                   GCIT_ProcessorSpeed, (IPTR) &speed, TAG_DONE);
++    // processor.resource says "Unknown" when it cannot name the CPU (the
++    // Pi system of 2026-08-22): that is no name, not a model called so.
++    if (!model || !*model || ffStrEqualsIgnCase((const char*) model, "Unknown")) {
++        return "processor.resource does not name this processor";
++    }
++    ffStrbufSetS(&cpu->name, (const char*) model);
++    // Processors the system found; whether exec schedules on all of them
++    // (an SMP build) is not reported here.
++    cpu->coresPhysical = cpu->coresLogical = cpu->coresOnline = (uint16_t) count;
++    cpu->packages = count ? 1 : 0;
++    if (speed) {
++        cpu->frequencyBase = (uint32_t) (speed / 1000000);
++    }
++#if __x86_64__
++    ffCPUDetectByCpuid(cpu); // base and maximum clock where CPUID reports them
++#endif
++    return nullptr;
++}
+diff --git a/src/detection/cpuusage/cpuusage_aros.c b/src/detection/cpuusage/cpuusage_aros.c
+new file mode 100644
+index 0000000..e738490
+--- /dev/null
++++ b/src/detection/cpuusage/cpuusage_aros.c
+@@ -0,0 +1,6 @@
++#include "cpuusage.h"
++
++// exec keeps no per-task CPU time accounting that sums to the whole machine.
++const char* ffGetCpuUsageInfo([[maybe_unused]] FFlist* cpuTimes) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/de/de_aros.c b/src/detection/de/de_aros.c
+new file mode 100644
+index 0000000..0b3ba4d
+--- /dev/null
++++ b/src/detection/de/de_aros.c
+@@ -0,0 +1,18 @@
++#include "de.h"
++#include "common/aros/aros_version.h"
++#include "common/strutil.h"
++
++const char* ffDetectDEVersion(const FFstrbuf* deName, FFstrbuf* result, [[maybe_unused]] FFDEOptions* options) {
++    // Wanderer is the only desktop detected (displayserver_aros.c); its
++    // program is WANDERER:Wanderer on AROS One 1.3 and mainline.
++    if (!instance.config.general.detectVersion) {
++        return "Disabled";
++    }
++    if (!ffStrbufEqualS(deName, "Wanderer")) {
++        return "Unknown desktop";
++    }
++    if (!ffArosFileVersion("WANDERER:Wanderer", result)) {
++        return "No version string in WANDERER:Wanderer";
++    }
++    return nullptr;
++}
+diff --git a/src/detection/disk/disk.c b/src/detection/disk/disk.c
+index 237681e..45821ce 100644
+--- a/src/detection/disk/disk.c
++++ b/src/detection/disk/disk.c
+@@ -28,7 +28,29 @@ const char* ffDetectDisks(FFDiskOptions* options, FFlist* disks) {
+     return nullptr;
+ }
+ 
+-#ifndef _WIN32
++#if defined(__AROS__)
++    #include <proto/dos.h>
++
++// AmigaDOS patterns ("#?", "(a|b)"), case-insensitive as volume and drawer
++// names are: the patterns users write in this system's own tools.
++bool ffDiskMatchesFolderPatterns(FFstrbuf* folders, const char* path, char separator) {
++    uint32_t startIndex = 0;
++    while (startIndex < folders->length) {
++        uint32_t sepIndex = ffStrbufNextIndexC(folders, startIndex, separator);
++        char savedSep = folders->chars[sepIndex];
++        folders->chars[sepIndex] = '\0';
++        char parsed[512];
++        bool matched = ParsePatternNoCase((CONST_STRPTR) &folders->chars[startIndex], (STRPTR) parsed, sizeof(parsed)) >= 0 &&
++                       MatchPatternNoCase((CONST_STRPTR) parsed, (STRPTR) path);
++        folders->chars[sepIndex] = savedSep;
++        if (matched) {
++            return true;
++        }
++        startIndex = sepIndex + 1;
++    }
++    return false;
++}
++#elif !defined(_WIN32)
+     #include <fnmatch.h>
+ 
+ bool ffDiskMatchesFolderPatterns(FFstrbuf* folders, const char* path, char separator) {
+diff --git a/src/detection/disk/disk.h b/src/detection/disk/disk.h
+index 2dea21e..bf21ab7 100644
+--- a/src/detection/disk/disk.h
++++ b/src/detection/disk/disk.h
+@@ -3,7 +3,8 @@
+ #include "fastfetch.h"
+ #include "modules/disk/option.h"
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(__AROS__)
++    // AmigaDOS names contain ':' ("SYS:"), as Windows ones do.
+     #define FF_DISK_FOLDER_SEPARATOR ';'
+ #else
+     #define FF_DISK_FOLDER_SEPARATOR ':'
+diff --git a/src/detection/disk/disk_aros.c b/src/detection/disk/disk_aros.c
+new file mode 100644
+index 0000000..0f7756f
+--- /dev/null
++++ b/src/detection/disk/disk_aros.c
+@@ -0,0 +1,150 @@
++#include "disk.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dosextens.h>
++#include <dos/filehandler.h>
++#include <string.h>
++
++typedef struct {
++    char name[108]; // "Volume:"
++    char device[108]; // "DH0:", when found
++    ULONG deviceDosType; // from the device's mount environment, 0 if none
++} VolumeName;
++
++// The DOS type the device was mounted with. Info() answers ID_DOS_DISK
++// ("DOS\0") for FAT and ISO 9660 volumes (fat-handler, cdrom-handler on
++// AROS One 1.3 and mainline); the mount environment names the real one.
++// dol_Startup is not always a FileSysStartupMsg: handlers may keep a small
++// number or a string there, so every pointer is checked to be memory.
++static ULONG deviceDosType(struct DosList* device) {
++    BPTR startup = device->dol_misc.dol_handler.dol_Startup;
++    if ((IPTR) startup < 0x1000) {
++        return 0;
++    }
++    struct FileSysStartupMsg* fssm = BADDR(startup);
++    if (!TypeOfMem(fssm) || !fssm->fssm_Environ) {
++        return 0;
++    }
++    struct DosEnvec* de = BADDR(fssm->fssm_Environ);
++    if (!TypeOfMem(de) || de->de_TableSize < DE_DOSTYPE) {
++        return 0;
++    }
++    return (ULONG) de->de_DosType;
++}
++
++static void bstrCopy(char* out, size_t size, BSTR b) {
++#ifdef AROS_FAST_BSTR
++    size_t n = strlen((const char*) AROS_BSTR_ADDR(b)); // the SDK macro passes a STRPTR to strlen
++#else
++    size_t n = (size_t) AROS_BSTR_strlen(b);
++#endif
++    if (n > size - 2) {
++        n = size - 2;
++    }
++    memcpy(out, AROS_BSTR_ADDR(b), n);
++    out[n] = ':';
++    out[n + 1] = '\0';
++}
++
++// "SFS\0" -> "SFS", "DOS\3" -> "DOS3": the four bytes of the DOS type.
++static void dosType(FFstrbuf* out, ULONG type) {
++    char t[5] = { (char) (type >> 24), (char) (type >> 16), (char) (type >> 8), (char) type, 0 };
++    for (int i = 0; i < 3; ++i) {
++        if ((unsigned char) t[i] < 0x20 || (unsigned char) t[i] > 0x7e) {
++            ffStrbufSetF(out, "0x%08lx", (unsigned long) type);
++            return;
++        }
++    }
++    if ((unsigned char) t[3] < 0x20) {
++        t[3] = (char) ('0' + t[3]);
++    }
++    if (t[3] == '0' && !ffStrEquals(t, "DOS0")) {
++        t[3] = 0;
++    }
++    ffStrbufSetS(out, t);
++}
++
++const char* ffDetectDisksImpl(FFDiskOptions* options, FFlist* disks) {
++    VolumeName names[32];
++    uint32_t count = 0;
++
++    // Volumes in a drive (dol_Task set), and the device each is mounted on.
++    struct DosList* dl = LockDosList(LDF_VOLUMES | LDF_DEVICES | LDF_READ);
++    struct DosList* v = dl;
++    while (count < 32 && (v = NextDosEntry(v, LDF_VOLUMES))) {
++        if (!v->dol_Task) {
++            continue;
++        }
++        VolumeName* n = &names[count++];
++        bstrCopy(n->name, sizeof(n->name), v->dol_Name);
++        n->device[0] = '\0';
++        n->deviceDosType = 0;
++        struct DosList* d = dl;
++        while ((d = NextDosEntry(d, LDF_DEVICES))) {
++            if (d->dol_Task == v->dol_Task) {
++                bstrCopy(n->device, sizeof(n->device), d->dol_Name);
++                n->deviceDosType = deviceDosType(d);
++                break;
++            }
++        }
++    }
++    UnLockDosList(LDF_VOLUMES | LDF_DEVICES | LDF_READ);
++
++    struct Process* me = (struct Process*) FindTask(nullptr);
++    APTR window = me->pr_WindowPtr;
++    me->pr_WindowPtr = (APTR) -1; // a removed disk must not open a requester
++    for (uint32_t i = 0; i < count; ++i) {
++        const char* path = names[i].name;
++        if (options->folders.length && !ffStrbufSeparatedContainS(&options->folders, path, FF_DISK_FOLDER_SEPARATOR)) {
++            continue;
++        }
++        if (options->hideFolders.length && ffDiskMatchesFolderPatterns(&options->hideFolders, path, FF_DISK_FOLDER_SEPARATOR)) {
++            continue;
++        }
++        BPTR lock = Lock((CONST_STRPTR) path, ACCESS_READ);
++        if (!lock) {
++            continue;
++        }
++        struct InfoData id;
++        bool ok = Info(lock, &id);
++        UnLock(lock);
++        if (!ok || id.id_BytesPerBlock <= 0) {
++            continue;
++        }
++        FF_STRBUF_AUTO_DESTROY fs = ffStrbufCreate();
++        ULONG type = (ULONG) id.id_DiskType;
++        if (type == ID_DOS_DISK && names[i].deviceDosType) {
++            type = names[i].deviceDosType;
++        }
++        dosType(&fs, type);
++        if (options->hideFS.length && ffStrbufSeparatedContainS(&options->hideFS, fs.chars, ':')) {
++            continue;
++        }
++
++        FFDisk* disk = FF_LIST_ADD(FFDisk, *disks);
++        uint64_t block = (uint64_t) id.id_BytesPerBlock;
++        uint64_t total = (uint64_t) (ULONG) id.id_NumBlocks;
++        uint64_t used = (uint64_t) (ULONG) id.id_NumBlocksUsed;
++        disk->bytesTotal = total * block;
++        disk->bytesFree = used <= total ? (total - used) * block : 0;
++        disk->filesUsed = 0;
++        disk->filesTotal = 0;
++        disk->createTime = 0;
++        ffStrbufInitS(&disk->mountFrom, names[i].device);
++        ffStrbufInitS(&disk->mountpoint, path);
++        ffStrbufInitMove(&disk->filesystem, &fs);
++        ffStrbufInitNS(&disk->name, (uint32_t) strlen(path) - 1, path);
++        disk->type = FF_DISK_VOLUME_TYPE_REGULAR_BIT;
++        // The RAM disk grows with its contents: its "size" is free memory.
++        if (ffStrEquals(names[i].device, "RAM:")) {
++            disk->type = FF_DISK_VOLUME_TYPE_HIDDEN_BIT;
++        }
++        if (id.id_DiskState == ID_WRITE_PROTECTED) {
++            disk->type |= FF_DISK_VOLUME_TYPE_READONLY_BIT;
++        }
++    }
++    me->pr_WindowPtr = window;
++    return nullptr;
++}
+diff --git a/src/detection/displayserver/displayserver_aros.c b/src/detection/displayserver/displayserver_aros.c
+new file mode 100644
+index 0000000..51d1f05
+--- /dev/null
++++ b/src/detection/displayserver/displayserver_aros.c
+@@ -0,0 +1,67 @@
++#include "displayserver.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/intuition.h>
++#include <proto/graphics.h>
++#include <exec/execbase.h>
++#include <graphics/displayinfo.h>
++#include <intuition/intuitionbase.h>
++#include <intuition/screens.h>
++#include <string.h>
++
++// Wanderer runs as a CLI process named after its command, for example
++// "WANDERER:Wanderer" on AROS One 1.3 and mainline; FindTask("Wanderer")
++// finds nothing there. The last component of a task's name is compared.
++static bool taskRunning(const char* program) {
++    bool found = false;
++    Forbid();
++    struct List* lists[] = { &SysBase->TaskReady, &SysBase->TaskWait };
++    for (unsigned i = 0; i < 2 && !found; ++i) {
++        for (struct Node* n = lists[i]->lh_Head; n->ln_Succ && !found; n = n->ln_Succ) {
++            const char* name = n->ln_Name;
++            if (!name) {
++                continue;
++            }
++            const char* last = name;
++            for (const char* p = name; *p; ++p) {
++                if (*p == ':' || *p == '/') {
++                    last = p + 1;
++                }
++            }
++            found = ffStrEquals(last, program);
++        }
++    }
++    Permit();
++    return found;
++}
++
++void ffConnectDisplayServerImpl(FFDisplayServerResult* ds) {
++    // Windows are managed by intuition.library itself.
++    ffStrbufSetStatic(&ds->wmProcessName, "intuition.library");
++    ffStrbufSetF(&ds->wmPrettyName, "Intuition %u.%u", (unsigned) IntuitionBase->LibNode.lib_Version,
++                 (unsigned) IntuitionBase->LibNode.lib_Revision);
++    if (taskRunning("Wanderer")) {
++        ffStrbufSetStatic(&ds->deProcessName, "Wanderer");
++        // Its version is the DE module's (de_aros.c).
++        ffStrbufSetStatic(&ds->dePrettyName, "Wanderer");
++    }
++
++    // The default public screen (Workbench): what the user sees.
++    struct Screen* screen = LockPubScreen(nullptr);
++    if (!screen) {
++        return;
++    }
++    ULONG mode = GetVPModeID(&screen->ViewPort);
++    FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
++    struct NameInfo info;
++    if (mode != (ULONG) INVALID_ID && GetDisplayInfoData(nullptr, (UBYTE*) &info, sizeof(info), DTAG_NAME, mode)) {
++        ffStrbufSetS(&name, (const char*) info.Name);
++    }
++    FFDisplayResult* display = ffdsAppendDisplay(ds, (uint32_t) screen->Width, (uint32_t) screen->Height, 0, 0, 0, 0, 0, 0,
++                                                 &name, FF_DISPLAY_TYPE_UNKNOWN, true, mode, 0, 0, "graphics.library");
++    if (display) {
++        display->bitDepth = (uint8_t) GetBitMapAttr(screen->RastPort.BitMap, BMA_DEPTH);
++    }
++    UnlockPubScreen(nullptr, screen);
++}
+diff --git a/src/detection/dns/dns_aros.c b/src/detection/dns/dns_aros.c
+new file mode 100644
+index 0000000..69ea2d4
+--- /dev/null
++++ b/src/detection/dns/dns_aros.c
+@@ -0,0 +1,6 @@
++#include "dns.h"
++
++// Name servers are AROSTCP settings; not read yet.
++const char* ffDetectDNS([[maybe_unused]] FFDNSOptions* options, [[maybe_unused]] FFlist* results) {
++    return "Not supported on AROS yet";
++}
+diff --git a/src/detection/font/font_aros.c b/src/detection/font/font_aros.c
+new file mode 100644
+index 0000000..8271c98
+--- /dev/null
++++ b/src/detection/font/font_aros.c
+@@ -0,0 +1,46 @@
++#include "font.h"
++
++#include <proto/exec.h>
++#include <proto/intuition.h>
++#include <proto/graphics.h>
++#include <graphics/gfxbase.h>
++#include <intuition/screens.h>
++#include <string.h>
++
++static void setFont(FFstrbuf* out, const char* name, unsigned size) {
++    if (!name || !*name) {
++        return;
++    }
++    size_t n = strlen(name);
++    if (n > 5 && strcmp(name + n - 5, ".font") == 0) {
++        n -= 5;
++    }
++    ffStrbufSetNS(out, (uint32_t) n, name);
++    ffStrbufAppendF(out, " %u", size);
++}
++
++const char* ffDetectFontImpl(FFFontResult* font) {
++    // [0] the Workbench screen's font, [1] the system default (text) font.
++    struct Screen* screen = LockPubScreen(nullptr);
++    if (screen) {
++        if (screen->Font) {
++            setFont(&font->fonts[0], (const char*) screen->Font->ta_Name, screen->Font->ta_YSize);
++        }
++        UnlockPubScreen(nullptr, screen);
++    }
++    if (GfxBase->DefaultFont) {
++        setFont(&font->fonts[1], GfxBase->DefaultFont->tf_Message.mn_Node.ln_Name, GfxBase->DefaultFont->tf_YSize);
++    }
++    if (font->fonts[0].length) {
++        ffStrbufAppend(&font->display, &font->fonts[0]);
++        ffStrbufAppendS(&font->display, " [Screen]");
++    }
++    if (font->fonts[1].length) {
++        if (font->display.length) {
++            ffStrbufAppendS(&font->display, ", ");
++        }
++        ffStrbufAppend(&font->display, &font->fonts[1]);
++        ffStrbufAppendS(&font->display, " [System]");
++    }
++    return nullptr;
++}
+diff --git a/src/detection/gpu/gpu_aros.c b/src/detection/gpu/gpu_aros.c
+new file mode 100644
+index 0000000..23bfd4b
+--- /dev/null
++++ b/src/detection/gpu/gpu_aros.c
+@@ -0,0 +1,7 @@
++#include "gpu.h"
++
++// AROS graphics drivers do not say which GPU they drive; the Display
++// module shows the driver's mode name ("VESA: ...", "VideoCore: ...").
++const char* ffDetectGPUImpl([[maybe_unused]] const FFGPUOptions* options, [[maybe_unused]] FFlist* gpus) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/initsystem/initsystem_aros.c b/src/detection/initsystem/initsystem_aros.c
+new file mode 100644
+index 0000000..64fd091
+--- /dev/null
++++ b/src/detection/initsystem/initsystem_aros.c
+@@ -0,0 +1,5 @@
++#include "initsystem.h"
++
++const char* ffDetectInitSystem([[maybe_unused]] FFInitSystemResult* result) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/locale/locale_aros.c b/src/detection/locale/locale_aros.c
+new file mode 100644
+index 0000000..79bb385
+--- /dev/null
++++ b/src/detection/locale/locale_aros.c
+@@ -0,0 +1,39 @@
++#include "locale.h"
++
++#include <proto/exec.h>
++#include <proto/locale.h>
++#include <libraries/locale.h>
++#include <string.h>
++
++static void appendName(FFstrbuf* out, const char* name, const char* suffix) {
++    size_t n = strlen(name), s = strlen(suffix);
++    if (n > s && strcmp(name + n - s, suffix) == 0) {
++        n -= s;
++    }
++    ffStrbufAppendNS(out, (uint32_t) n, name);
++}
++
++const char* ffDetectLocale(FFstrbuf* result) {
++    struct Library* LocaleBase = OpenLibrary((CONST_STRPTR) "locale.library", 0);
++    if (!LocaleBase) {
++        return "locale.library is unavailable";
++    }
++    struct Locale* locale = OpenLocale(nullptr);
++    if (!locale) {
++        CloseLibrary(LocaleBase);
++        return "OpenLocale() failed";
++    }
++    // As Prefs/Locale names them: language and country files.
++    if (locale->loc_LanguageName) {
++        appendName(result, (const char*) locale->loc_LanguageName, ".language");
++    }
++    if (locale->loc_LocaleName) {
++        if (result->length) {
++            ffStrbufAppendS(result, ", ");
++        }
++        appendName(result, (const char*) locale->loc_LocaleName, ".country");
++    }
++    CloseLocale(locale);
++    CloseLibrary(LocaleBase);
++    return result->length ? nullptr : "The locale has no names";
++}
+diff --git a/src/detection/localip/localip_aros.c b/src/detection/localip/localip_aros.c
+new file mode 100644
+index 0000000..44af302
+--- /dev/null
++++ b/src/detection/localip/localip_aros.c
+@@ -0,0 +1,155 @@
++#include "localip.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/bsdsocket.h>
++#include <sys/socket.h>
++#include <sys/sockio.h>
++#include <net/if.h>
++#include <netinet/in.h>
++#include <string.h>
++
++// The SDK's net/if.h follows FreeBSD, where 0x40 is IFF_DRV_RUNNING; AROSTCP
++// reports the 4.4BSD IFF_RUNNING there.
++#ifndef IFF_RUNNING
++    #define IFF_RUNNING 0x40
++#endif
++
++// bsdsocket.library is opened here, by this module only. A program that
++// defines a global SocketBase gets the SDK's net autoinit, which refuses to
++// start without a TCP/IP stack; fastfetch must run without one.
++
++static const FFLocalIpNIFlag niFlagOptions[] = {
++    { IFF_UP, "UP" },
++    { IFF_BROADCAST, "BROADCAST" },
++    { IFF_LOOPBACK, "LOOPBACK" },
++    { IFF_POINTOPOINT, "POINTOPOINT" },
++    { IFF_RUNNING, "RUNNING" },
++    { IFF_NOARP, "NOARP" },
++    { IFF_PROMISC, "PROMISC" },
++    { IFF_ALLMULTI, "ALLMULTI" },
++    { IFF_MULTICAST, "MULTICAST" },
++    {},
++};
++
++static void appendIpv4(FFstrbuf* buffer, const struct sockaddr_in* address, const struct sockaddr_in* netmask) {
++    const uint8_t* b = (const uint8_t*) &address->sin_addr.s_addr;
++    if (buffer->length) {
++        ffStrbufAppendC(buffer, ',');
++    }
++    ffStrbufAppendF(buffer, "%u.%u.%u.%u", b[0], b[1], b[2], b[3]);
++    if (netmask) {
++        int cidr = __builtin_popcount(netmask->sin_addr.s_addr);
++        if (cidr != 0) {
++            ffStrbufAppendF(buffer, "/%d", cidr);
++        }
++    }
++}
++
++const char* ffDetectLocalIps(const FFLocalIpOptions* options, FFlist* results) {
++    if (!(options->showType & FF_LOCALIP_TYPE_IPV4_BIT)) {
++        return "Only IPv4 addresses are read on AROS";
++    }
++    struct Library* SocketBase = OpenLibrary((CONST_STRPTR) "bsdsocket.library", 4);
++    if (!SocketBase) {
++        return "No TCP/IP stack is running (bsdsocket.library is not available)";
++    }
++    const char* error = nullptr;
++    LONG s = socket(AF_INET, SOCK_DGRAM, 0);
++    if (s < 0) {
++        CloseLibrary(SocketBase);
++        return "socket() failed";
++    }
++
++    char buffer[4096];
++    struct ifconf ifc = { .ifc_len = sizeof(buffer), .ifc_buf = buffer };
++    if (IoctlSocket(s, SIOCGIFCONF, (char*) &ifc) < 0) {
++        error = "SIOCGIFCONF failed";
++        goto exit;
++    }
++
++    // BSD entries vary in length: the name, then an address of sa_len bytes
++    // (at least a struct sockaddr).
++    for (char* p = buffer; p < buffer + ifc.ifc_len;) {
++        struct ifreq* entry = (struct ifreq*) p;
++        size_t addressLength = entry->ifr_addr.sa_len > sizeof(struct sockaddr) ? entry->ifr_addr.sa_len : sizeof(struct sockaddr);
++        p += sizeof(entry->ifr_name) + addressLength;
++        if (entry->ifr_addr.sa_family != AF_INET) {
++            continue;
++        }
++        if (options->namePrefix.length && strncmp(entry->ifr_name, options->namePrefix.chars, options->namePrefix.length) != 0) {
++            continue;
++        }
++
++        struct ifreq request;
++        memset(&request, 0, sizeof(request));
++        memcpy(request.ifr_name, entry->ifr_name, sizeof(request.ifr_name)); // NUL-padded, as SIOCGIFCONF gave it
++        short flags = IoctlSocket(s, SIOCGIFFLAGS, (char*) &request) == 0 ? request.ifr_flags : 0;
++        if (!(flags & IFF_UP)) {
++            continue;
++        }
++        if ((flags & IFF_LOOPBACK) && !(options->showType & FF_LOCALIP_TYPE_LOOP_BIT)) {
++            continue;
++        }
++
++        // AROSTCP's routing table is not read here. The default route is
++        // taken to go through the first interface that is up and not the
++        // loopback, which on a desktop with one network card it does.
++        bool isDefault = !(flags & IFF_LOOPBACK);
++        for (uint32_t i = 0; isDefault && i < results->length; ++i) {
++            if (FF_LIST_GET(FFLocalIpResult, *results, i)->defaultRoute & FF_LOCALIP_TYPE_IPV4_BIT) {
++                isDefault = false;
++            }
++        }
++        if ((options->showType & FF_LOCALIP_TYPE_DEFAULT_ROUTE_ONLY_BIT) && !isDefault) {
++            continue;
++        }
++
++        FFLocalIpResult* item = nullptr;
++        for (uint32_t i = 0; i < results->length; ++i) {
++            FFLocalIpResult* existing = FF_LIST_GET(FFLocalIpResult, *results, i);
++            if (existing->name.length == strnlen(entry->ifr_name, sizeof(entry->ifr_name)) &&
++                memcmp(existing->name.chars, entry->ifr_name, existing->name.length) == 0) {
++                item = existing;
++            }
++        }
++        if (!item) {
++            item = FF_LIST_ADD(FFLocalIpResult, *results);
++            // A name of IFNAMSIZ characters has no NUL.
++            ffStrbufInitNS(&item->name, (uint32_t) strnlen(entry->ifr_name, sizeof(entry->ifr_name)), entry->ifr_name);
++            ffStrbufInit(&item->ipv4);
++            ffStrbufInit(&item->ipv6);
++            ffStrbufInit(&item->mac);
++            ffStrbufInit(&item->flags);
++            item->defaultRoute = isDefault ? FF_LOCALIP_TYPE_IPV4_BIT : FF_LOCALIP_TYPE_NONE;
++            item->mtu = -1;
++            item->speed = -1;
++            if (options->showType & FF_LOCALIP_TYPE_FLAGS_BIT) {
++                ffLocalIpFillNIFlags(&item->flags, (uint16_t) flags, niFlagOptions);
++            }
++            if ((options->showType & FF_LOCALIP_TYPE_MTU_BIT) && IoctlSocket(s, SIOCGIFMTU, (char*) &request) == 0) {
++                item->mtu = request.ifr_mtu;
++            }
++        } else if (!(options->showType & FF_LOCALIP_TYPE_ALL_IPS_BIT)) {
++            continue;
++        }
++
++        struct sockaddr_in netmask;
++        bool haveMask = false;
++        if (options->showType & FF_LOCALIP_TYPE_PREFIX_LEN_BIT) {
++            memset(&request.ifr_addr, 0, sizeof(request.ifr_addr));
++            if (IoctlSocket(s, SIOCGIFNETMASK, (char*) &request) == 0) {
++                memcpy(&netmask, &request.ifr_addr, sizeof(netmask));
++                haveMask = true;
++            }
++        }
++        struct sockaddr_in address;
++        memcpy(&address, &entry->ifr_addr, sizeof(address));
++        appendIpv4(&item->ipv4, &address, haveMask ? &netmask : nullptr);
++    }
++
++exit:
++    CloseSocket(s);
++    CloseLibrary(SocketBase);
++    return error;
++}
+diff --git a/src/detection/media/media_aros.c b/src/detection/media/media_aros.c
+new file mode 100644
+index 0000000..550f626
+--- /dev/null
++++ b/src/detection/media/media_aros.c
+@@ -0,0 +1,5 @@
++#include "media.h"
++
++void ffDetectMediaImpl(FFMediaResult* media, [[maybe_unused]] bool saveCover) {
++    ffStrbufAppendS(&media->error, "Not supported on AROS");
++}
+diff --git a/src/detection/memory/memory_aros.c b/src/detection/memory/memory_aros.c
+new file mode 100644
+index 0000000..b7c68d6
+--- /dev/null
++++ b/src/detection/memory/memory_aros.c
+@@ -0,0 +1,14 @@
++#include "memory.h"
++
++#include <proto/exec.h>
++
++const char* ffDetectMemory(FFMemoryResult* ram) {
++    // All memory exec manages; MEMF_TOTAL counts what free does not.
++    ram->bytesTotal = AvailMem(MEMF_ANY | MEMF_TOTAL);
++    uint64_t available = AvailMem(MEMF_ANY);
++    if (ram->bytesTotal == 0 || available > ram->bytesTotal) {
++        return "AvailMem() returned no usable totals";
++    }
++    ram->bytesUsed = ram->bytesTotal - available;
++    return nullptr;
++}
+diff --git a/src/detection/opengl/opengl_aros.c b/src/detection/opengl/opengl_aros.c
+new file mode 100644
+index 0000000..c7c51e5
+--- /dev/null
++++ b/src/detection/opengl/opengl_aros.c
+@@ -0,0 +1,5 @@
++#include "opengl.h"
++
++const char* ffDetectOpenGL([[maybe_unused]] FFOpenGLOptions* options, [[maybe_unused]] FFOpenGLResult* result) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/os/os_aros.c b/src/detection/os/os_aros.c
+new file mode 100644
+index 0000000..104ba34
+--- /dev/null
++++ b/src/detection/os/os_aros.c
+@@ -0,0 +1,47 @@
++#include "os.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/aros.h>
++#include <aros/inquire.h>
++#include <sys/utsname.h>
++
++void ffDetectOSImpl(FFOSResult* os) {
++    ffStrbufSetStatic(&os->name, "AROS");
++    ffStrbufSetStatic(&os->id, "aros");
++    // The ABI and platform this binary is built for: it runs only there.
++    // aros.library's AI_ArosABIMajor answers on ABIv11 only (mainline and
++    // the Pi report it as unknown), so the build target is the source.
++#if defined(FF_AROS_TARGET)
++    const char* target = FF_AROS_TARGET;
++    if (ffStrContains(target, "-abiv11-")) {
++        ffStrbufSetStatic(&os->variant, "ABIv11");
++    } else if (ffStrContains(target, "-abiv1-")) {
++        ffStrbufSetStatic(&os->variant, ffStrEndsWith(target, "-raspi") ? "ABIv1, Raspberry Pi" : "ABIv1");
++    }
++    ffStrbufSetS(&os->variantID, target);
++#endif
++
++    // A distribution that names itself does so through aros.library; most
++    // (AROS One 1.3, mainline, the Pi system of 2026-08-22) leave it empty,
++    // and then no distribution is guessed. Without one the OS module builds
++    // "AROS (ABIv11)" from name and variant; a pretty name replaces that
++    // whole line, so it carries the variant itself.
++    struct Library* ArosBase = OpenLibrary((CONST_STRPTR) "aros.library", 0);
++    if (ArosBase) {
++        STRPTR distribution = nullptr;
++        ArosInquire(AI_ArosVariant, (IPTR) &distribution, TAG_DONE);
++        if (distribution && *distribution) {
++            ffStrbufSetF(&os->prettyName, "AROS %s", (const char*) distribution);
++            if (os->variant.length) {
++                ffStrbufAppendF(&os->prettyName, " (%s)", os->variant.chars);
++            }
++        }
++        CloseLibrary(ArosBase);
++    }
++
++    struct utsname u;
++    if (uname(&u) == 0) {
++        ffStrbufSetS(&os->buildID, u.version);
++    }
++}
+diff --git a/src/detection/packages/packages_aros.c b/src/detection/packages/packages_aros.c
+new file mode 100644
+index 0000000..3fd78fe
+--- /dev/null
++++ b/src/detection/packages/packages_aros.c
+@@ -0,0 +1,7 @@
++#include "packages.h"
++
++// apkg keeps its registry per package root, which can be anywhere, and no
++// other package manager is common on AROS: nothing is counted, so the
++// module reports that it found none rather than a guessed number.
++void ffDetectPackagesImpl([[maybe_unused]] FFPackagesResult* result, [[maybe_unused]] FFPackagesOptions* options) {
++}
+diff --git a/src/detection/processes/processes_aros.c b/src/detection/processes/processes_aros.c
+new file mode 100644
+index 0000000..6f3c3e6
+--- /dev/null
++++ b/src/detection/processes/processes_aros.c
+@@ -0,0 +1,21 @@
++#include "processes.h"
++
++#include <proto/exec.h>
++#include <exec/execbase.h>
++
++const char* ffDetectProcesses([[maybe_unused]] const FFProcessesOptions* options, FFProcessesResult* result) {
++    // Every exec task, processes and plain tasks alike: AROS has no
++    // separate threads. This one is running, so it is on neither list.
++    uint32_t count = 1;
++    Forbid();
++    for (struct Node* n = SysBase->TaskReady.lh_Head; n->ln_Succ; n = n->ln_Succ) {
++        ++count;
++    }
++    for (struct Node* n = SysBase->TaskWait.lh_Head; n->ln_Succ; n = n->ln_Succ) {
++        ++count;
++    }
++    Permit();
++    result->processes = count;
++    result->threads = 0;
++    return nullptr;
++}
+diff --git a/src/detection/sound/sound_aros.c b/src/detection/sound/sound_aros.c
+new file mode 100644
+index 0000000..c45fb06
+--- /dev/null
++++ b/src/detection/sound/sound_aros.c
+@@ -0,0 +1,5 @@
++#include "sound.h"
++
++const char* ffDetectSound([[maybe_unused]] FFSoundOptions* options, [[maybe_unused]] FFlist* devices) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/swap/swap_aros.c b/src/detection/swap/swap_aros.c
+new file mode 100644
+index 0000000..998722c
+--- /dev/null
++++ b/src/detection/swap/swap_aros.c
+@@ -0,0 +1,6 @@
++#include "swap.h"
++
++const char* ffDetectSwap(FFlist* result) {
++    FF_UNUSED(result)
++    return "AROS has no swap";
++}
+diff --git a/src/detection/terminalfont/terminalfont_aros.c b/src/detection/terminalfont/terminalfont_aros.c
+new file mode 100644
+index 0000000..fb03a8b
+--- /dev/null
++++ b/src/detection/terminalfont/terminalfont_aros.c
+@@ -0,0 +1,7 @@
++#include "terminalfont.h"
++#include "detection/terminalshell/terminalshell.h"
++
++bool ffDetectTerminalFontPlatform([[maybe_unused]] const FFTerminalResult* terminal, [[maybe_unused]] FFTerminalFontResult* terminalFont) {
++    // No console reports its font: neither CON: nor Limpet's queries.
++    return false;
++}
+diff --git a/src/detection/terminalshell/terminalshell_aros.c b/src/detection/terminalshell/terminalshell_aros.c
+new file mode 100644
+index 0000000..a02fdae
+--- /dev/null
++++ b/src/detection/terminalshell/terminalshell_aros.c
+@@ -0,0 +1,121 @@
++#include "terminalshell.h"
++#include "common/FFcache.h"
++#include "common/aros/aros_terminal.h"
++#include "common/strutil.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++#include <dos/dosextens.h>
++#include <string.h>
++
++static FFShellResult shellResult;
++
++static void destroyShellResult(void* storage) {
++    FFShellResult* result = storage;
++    ffStrbufDestroy(&result->processName);
++    ffStrbufDestroy(&result->exe);
++    ffStrbufDestroy(&result->exePath);
++    ffStrbufDestroy(&result->prettyName);
++    ffStrbufDestroy(&result->version);
++}
++
++static FFcacheEntry ffCacheEntryShell = {
++    .name = "shell",
++    .storage = &shellResult,
++    .destroy = destroyShellResult,
++};
++
++const FFShellResult* ffDetectShell() {
++    FFShellResult* result = &shellResult;
++    if (!ffCacheBeginInit(&ffCacheEntryShell)) {
++        return result;
++    }
++    ffStrbufInit(&result->processName);
++    ffStrbufInit(&result->exe);
++    ffStrbufInit(&result->exePath);
++    ffStrbufInit(&result->prettyName);
++    ffStrbufInit(&result->version);
++    result->exeName = result->exe.chars;
++    result->pid = result->ppid = 0;
++    result->tty = -1;
++
++    // fastfetch runs as a command of an AROS Shell (CLI) process, or from
++    // Workbench without one.
++    if (!Cli()) {
++        return result;
++    }
++    ffStrbufSetStatic(&result->processName, "Shell");
++    ffStrbufSetStatic(&result->prettyName, "AROS Shell");
++    result->pid = (uint32_t) ((struct Process*) FindTask(nullptr))->pr_TaskNum;
++    // No version: the Shell is a resident segment with no file in C: and no
++    // ROM module name to ask (AROS One 1.3 and mainline, checked with
++    // FindResident/OpenResource), so there is nothing to read it from.
++    ffStrbufSet(&result->exe, &result->exePath);
++    result->exeName = result->exe.chars;
++    return result;
++}
++
++static FFTerminalResult terminalResult;
++
++static void destroyTerminalResult(void* storage) {
++    FFTerminalResult* result = storage;
++    ffStrbufDestroy(&result->processName);
++    ffStrbufDestroy(&result->exe);
++    ffStrbufDestroy(&result->exePath);
++    ffStrbufDestroy(&result->prettyName);
++    ffStrbufDestroy(&result->version);
++    ffStrbufDestroy(&result->tty);
++}
++
++static FFcacheEntry ffCacheEntryTerminal = {
++    .name = "terminal",
++    .storage = &terminalResult,
++    .destroy = destroyTerminalResult,
++};
++
++const FFTerminalResult* ffDetectTerminal() {
++    FFTerminalResult* result = &terminalResult;
++    if (!ffCacheBeginInit(&ffCacheEntryTerminal)) {
++        return result;
++    }
++    ffStrbufInit(&result->processName);
++    ffStrbufInit(&result->exe);
++    ffStrbufInit(&result->exePath);
++    ffStrbufInit(&result->prettyName);
++    ffStrbufInit(&result->version);
++    ffStrbufInit(&result->tty);
++    result->exeName = result->exe.chars;
++    result->pid = result->ppid = 0;
++
++    // The console that handles the output: its task's name ("CON", or the
++    // program's path for Limpet's frontend), and the terminal's own name
++    // and version when it answers the identity query.
++    const char* task = ffArosTerminalHandlerTask();
++    if (!*task) {
++        return result;
++    }
++    const char* base = task;
++    for (const char* p = task; *p; ++p) {
++        if (*p == ':' || *p == '/') {
++            base = p + 1;
++        }
++    }
++    ffStrbufSetS(&result->processName, *base ? base : task);
++    if (ffStrContainsC(task, ':')) {
++        ffStrbufSetS(&result->exePath, task);
++        ffStrbufSet(&result->exe, &result->exePath);
++    }
++    result->exeName = result->exe.length ? result->exe.chars + (base - task) : result->exe.chars;
++    const LimpetIdentity* id = ffArosTerminalIdentity();
++    if (id) {
++        ffStrbufSetS(&result->prettyName, id->name);
++        if (id->known & XTY_IDENTITY_KNOWN_VERSION) {
++            ffStrbufSetF(&result->version, "%u.%u.%u", (unsigned) id->major, (unsigned) id->minor, (unsigned) id->patch);
++        }
++    } else if (ffStrEquals(task, "CON")) {
++        ffStrbufSetStatic(&result->prettyName, "CON:");
++    } else {
++        ffStrbufSet(&result->prettyName, &result->processName);
++    }
++    return result;
++}
+diff --git a/src/detection/terminalsize/terminalsize_aros.c b/src/detection/terminalsize/terminalsize_aros.c
+new file mode 100644
+index 0000000..49b0631
+--- /dev/null
++++ b/src/detection/terminalsize/terminalsize_aros.c
+@@ -0,0 +1,15 @@
++#include "terminalsize.h"
++#include "common/aros/aros_terminal.h"
++
++bool ffDetectTerminalSize(FFTerminalSizeResult* result, [[maybe_unused]] bool fastOnly) {
++    // The size the console reports in its presentation reply. CON: reports
++    // none; its own size request is a console.device unit, not read here.
++    const LimpetPresentation* p = ffArosTerminalPresentation();
++    if (!p || !limpet_columns(p)) {
++        return false;
++    }
++    result->columns = (uint16_t) limpet_columns(p);
++    result->rows = (uint16_t) limpet_rows(p);
++    result->width = result->height = 0;
++    return true;
++}
+diff --git a/src/detection/top/top_aros.c b/src/detection/top/top_aros.c
+new file mode 100644
+index 0000000..5bcfc8b
+--- /dev/null
++++ b/src/detection/top/top_aros.c
+@@ -0,0 +1,5 @@
++#include "top.h"
++
++const char* ffTopGetProcessSnapshot([[maybe_unused]] FFlist* snapshots, [[maybe_unused]] FFTopTypes showTypes) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/uptime/uptime_aros.c b/src/detection/uptime/uptime_aros.c
+new file mode 100644
+index 0000000..2c8a9f3
+--- /dev/null
++++ b/src/detection/uptime/uptime_aros.c
+@@ -0,0 +1,29 @@
++#include "uptime.h"
++#include "common/time.h"
++
++#include <proto/exec.h>
++#include <proto/timer.h>
++#include <devices/timer.h>
++
++const char* ffDetectUptime(FFUptimeResult* result) {
++    struct MsgPort* port = CreateMsgPort();
++    if (!port) {
++        return "CreateMsgPort() failed";
++    }
++    struct timerequest* tr = (struct timerequest*) CreateIORequest(port, sizeof(*tr));
++    const char* error = "timer.device is unavailable";
++    if (tr && OpenDevice((CONST_STRPTR) TIMERNAME, UNIT_MICROHZ, (struct IORequest*) tr, 0) == 0) {
++        struct Device* TimerBase = tr->tr_node.io_Device;
++        struct timeval tv = {};
++        GetUpTime(&tv);
++        result->uptime = (uint64_t) tv.tv_secs * 1000 + tv.tv_micro / 1000;
++        result->bootTime = ffTimeGetNow() - result->uptime;
++        error = nullptr;
++        CloseDevice((struct IORequest*) tr);
++    }
++    if (tr) {
++        DeleteIORequest((struct IORequest*) tr);
++    }
++    DeleteMsgPort(port);
++    return error;
++}
+diff --git a/src/detection/users/users_aros.c b/src/detection/users/users_aros.c
+new file mode 100644
+index 0000000..793be15
+--- /dev/null
++++ b/src/detection/users/users_aros.c
+@@ -0,0 +1,6 @@
++#include "users.h"
++
++// A single-user system without logins.
++const char* ffDetectUsers([[maybe_unused]] FFUsersOptions* options, [[maybe_unused]] FFlist* users) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/version/version.c b/src/detection/version/version.c
+index b3c3514..a8de061 100644
+--- a/src/detection/version/version.c
++++ b/src/detection/version/version.c
+@@ -57,6 +57,8 @@
+     #define FF_SYSNAME "NetBSD"
+ #elif defined(__HAIKU__)
+     #define FF_SYSNAME "Haiku"
++#elif defined(__AROS__)
++    #define FF_SYSNAME "AROS"
+ #elif defined(__GNU__)
+     #define FF_SYSNAME "GNU"
+ #else
+diff --git a/src/detection/wallpaper/wallpaper_aros.c b/src/detection/wallpaper/wallpaper_aros.c
+new file mode 100644
+index 0000000..918949f
+--- /dev/null
++++ b/src/detection/wallpaper/wallpaper_aros.c
+@@ -0,0 +1,5 @@
++#include "wallpaper.h"
++
++const char* ffDetectWallpaper([[maybe_unused]] FFstrbuf* result) {
++    return "Not supported on AROS";
++}
+diff --git a/src/detection/wmtheme/wmtheme_aros.c b/src/detection/wmtheme/wmtheme_aros.c
+new file mode 100644
+index 0000000..2f01eb2
+--- /dev/null
++++ b/src/detection/wmtheme/wmtheme_aros.c
+@@ -0,0 +1,6 @@
++#include "wmtheme.h"
++
++bool ffDetectWmTheme(FFstrbuf* themeOrError) {
++    ffStrbufAppendS(themeOrError, "Not supported on AROS");
++    return false;
++}
+diff --git a/src/fastfetch.c b/src/fastfetch.c
+index 4591301..583a1f0 100644
+--- a/src/fastfetch.c
++++ b/src/fastfetch.c
+@@ -606,6 +606,11 @@ static void genConfigCommon(FFdata* data, const char* value) {
+         #ifdef _WIN32
+             && ffIsWindows10OrGreater()
+         #endif
++        #ifdef __AROS__
++            // The interactive editor needs raw keyboard input and an
++            // alternate screen; on AROS the file is written directly.
++            && false
++        #endif
+     ) {
+         data->genConfigInteractive = true;
+         setupGenConfigPath(data, value);
+diff --git a/src/modules/colors/colors.c b/src/modules/colors/colors.c
+index bbb29a6..ab321a4 100644
+--- a/src/modules/colors/colors.c
++++ b/src/modules/colors/colors.c
+@@ -17,6 +17,14 @@ static inline uint8_t max(uint8_t a, uint8_t b) {
+ bool ffPrintColors(FFColorsOptions* options) {
+     bool flag = false;
+ 
++#ifdef __AROS__
++    // Without colours there is nothing to show, and even the background
++    // symbol would write SGR sequences into a file or a plain console.
++    if (instance.config.display.pipe) {
++        return false;
++    }
++#endif
++
+     FF_STRBUF_AUTO_DESTROY result = ffStrbufCreateA(128);
+ 
+     if (options->symbol == FF_COLORS_SYMBOL_BLOCK || options->symbol == FF_COLORS_SYMBOL_BACKGROUND) {
+diff --git a/src/modules/disk/disk.c b/src/modules/disk/disk.c
+index b3176fe..92bc6a5 100644
+--- a/src/modules/disk/disk.c
++++ b/src/modules/disk/disk.c
+@@ -6,7 +6,7 @@
+ #include "detection/disk/disk.h"
+ #include "modules/disk/disk.h"
+ 
+-#ifndef _WIN32
++#if !defined(_WIN32) && !defined(__AROS__)
+     #include <fnmatch.h>
+ #endif
+ 
+@@ -432,7 +432,7 @@ void ffInitDiskOptions(FFDiskOptions* options) {
+     ffOptionInitModuleArg(&options->moduleArgs, "");
+ 
+     ffStrbufInit(&options->folders);
+-#if _WIN32 || __APPLE__ || __ANDROID__
++#if _WIN32 || __APPLE__ || __ANDROID__ || __AROS__
+     ffStrbufInit(&options->hideFolders);
+ #elif __HAIKU__
+     ffStrbufInitS(&options->hideFolders, "/esp"); // /boot on haiku is the system volume
+diff --git a/src/options/display.c b/src/options/display.c
+index 25d807e..3bedb80 100644
+--- a/src/options/display.c
++++ b/src/options/display.c
+@@ -1,3 +1,6 @@
++#ifdef __AROS__
++    #include "common/aros/aros_terminal.h"
++#endif
+ #include "fastfetch.h"
+ #include "common/color.h"
+ #include "common/io.h"
+@@ -954,7 +957,14 @@ void ffOptionsInitDisplay(FFOptionsDisplay* options) {
+     ffStrbufInitStatic(&options->keyValueSeparator, ": ");
+ 
+     options->showErrors = false;
++#ifdef __AROS__
++    // Colours only where the console behind the output confirms them (the
++    // Limpet presentation query); CON:, other consoles, files and pipes get
++    // plain text. An inherited COLORTERM says nothing about this output.
++    options->pipe = ffArosTerminalPlain() || !!getenv("NO_COLOR");
++#else
+     options->pipe = !ffIsTerminal(STDOUT_FILENO) || !!getenv("NO_COLOR");
++#endif
+     options->disableLinewrap = false;
+ 
+ #ifndef NDEBUG

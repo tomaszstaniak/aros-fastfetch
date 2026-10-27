@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] Title: no "@" without a user name
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: on a system without user accounts the user name is empty and the
+title printed "@host"; the separator under it was one character too long.
+Solution: print the host name alone when there is no user name, and count
+the "@" in the separator only when it is printed.
+Scope: modules/title/title.c (default output only; custom formats are
+unchanged) and modules/separator/separator.c. All platforms, but only
+an empty user name changes anything.
+Upstream-Status: suitable for upstream.
+Verification: default run on pool v1-1, v11-1 and rpi-1 (2026-10-27):
+"arosbox" with a 7-character separator.
+Removal: when upstream handles an empty user name.
+---
+ src/modules/separator/separator.c | 2 +-
+ src/modules/title/title.c         | 8 ++++++--
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/src/modules/separator/separator.c b/src/modules/separator/separator.c
+index c8ac4b3..bbb870c 100644
+--- a/src/modules/separator/separator.c
++++ b/src/modules/separator/separator.c
+@@ -23,7 +23,7 @@ bool ffPrintSeparator(FFSeparatorOptions* options) {
+     } else {
+         const FFPlatform* platform = &instance.state.platform;
+ 
+-        uint32_t titleLength = 1                                                                                      // @
++        uint32_t titleLength = (platform->userName.length > 0)                                                        // @, if there is a user name (title.c)
+             + ffUtf8StrWidth(platform->userName.chars, platform->userName.length)                                     // user name
+             + (instance.state.titleFqdn ? platform->hostName.length : ffStrbufFirstIndexC(&platform->hostName, '.')); // host name
+ 
+diff --git a/src/modules/title/title.c b/src/modules/title/title.c
+index aedf829..7921a02 100644
+--- a/src/modules/title/title.c
++++ b/src/modules/title/title.c
+@@ -47,8 +47,12 @@ bool ffPrintTitle(FFTitleOptions* options) {
+     if (options->moduleArgs.outputFormat.length == 0) {
+         ffPrintLogoAndKey(FF_MODULE_GET_DISPLAY_NAME(Title), 0, &options->moduleArgs, FF_PRINT_TYPE_DEFAULT);
+ 
+-        ffStrbufWriteTo(&userNameColored, stdout);
+-        ffStrbufWriteTo(&atColored, stdout);
++        // A system without user accounts (AROS) has no user name: then the
++        // title is the host name alone, not "@host".
++        if (instance.state.platform.userName.length > 0) {
++            ffStrbufWriteTo(&userNameColored, stdout);
++            ffStrbufWriteTo(&atColored, stdout);
++        }
+         ffStrbufPutTo(&hostNameColored, stdout);
+     } else {
+         FF_STRBUF_AUTO_DESTROY cwdTilde = ffStrbufCreate();

@@ -1,0 +1,21 @@
+{
+  "aros-x86_64-abiv11-pc": {
+    "AROS_CC": "/path/to/gcc-13/x86_64-aros-gcc",
+    "AROS_LINK_CC": "/path/to/abiv11-gcc-10.5/x86_64-aros-gcc",
+    "AROS_SDK": "/path/to/SDK-202609/Development",
+    "AROS_AR": "/path/to/abiv11-gcc-10.5/x86_64-aros-ar"
+  },
+  "aros-x86_64-abiv1-pc": {
+    "AROS_CC": "/path/to/gcc-13/x86_64-aros-gcc",
+    "AROS_LINK_CC": "/path/to/mainline/toolchain/x86_64-aros-gcc",
+    "AROS_SDK": "/path/to/mainline/AROS/Developer",
+    "AROS_AR": "/path/to/mainline/toolchain/x86_64-aros-ar"
+  },
+  "aros-aarch64-abiv1-raspi": {
+    "AROS_CC": "/path/to/raspi-aarch64/bin/aarch64-aros-clang",
+    "AROS_LINK_CC": "/path/to/raspi-aarch64/bin/aarch64-aros-clang",
+    "AROS_SDK": "/path/to/raspi-aarch64/sdk",
+    "AROS_AR": "/path/to/raspi-aarch64/bin/aarch64-aros-ar"
+  },
+  "apkg_pack": "/path/to/arospkg/tools/apkg-pack"
+}

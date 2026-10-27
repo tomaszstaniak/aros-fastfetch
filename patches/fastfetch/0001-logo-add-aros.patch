@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] Logo: add AROS
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: fastfetch has no logo for AROS, so the AROS port would show none
+or another system's.
+Solution: an ASCII logo of the word AROS with "AROS Research Operating
+System" under it, in blue, drawn for this port (no existing artwork used).
+Scope: src/logo/ascii/a/aros.txt and its entry in a.inc; no code.
+Upstream-Status: suitable for upstream as it is.
+Verification: shown by the default run on pool v1-1, v11-1 and rpi-1
+(2026-10-27), in CON: and in Limpet.
+Removal: when upstream fastfetch ships an AROS logo.
+---
+ src/logo/ascii/a.inc      | 13 +++++++++++++
+ src/logo/ascii/a/aros.txt |  7 +++++++
+ 2 files changed, 20 insertions(+)
+ create mode 100644 src/logo/ascii/a/aros.txt
+
+diff --git a/src/logo/ascii/a.inc b/src/logo/ascii/a.inc
+index c201368..3ecad08 100644
+--- a/src/logo/ascii/a.inc
++++ b/src/logo/ascii/a.inc
+@@ -641,6 +641,19 @@ static const FFlogo A[] = {
+         .colorTitle = FF_COLOR_FG_RED,
+     },
+     #endif
++    #ifdef FASTFETCH_DATATEXT_LOGO_AROS
++    // AROS
++    {
++        .names = { "AROS" },
++        .lines = FASTFETCH_DATATEXT_LOGO_AROS,
++        .colors = {
++            FF_COLOR_FG_BLUE,
++            FF_COLOR_FG_DEFAULT,
++        },
++        .colorKeys = FF_COLOR_FG_BLUE,
++        .colorTitle = FF_COLOR_FG_BLUE,
++    },
++    #endif
+     #ifdef FASTFETCH_DATATEXT_LOGO_ARTIX
+     // Artix
+     {
+diff --git a/src/logo/ascii/a/aros.txt b/src/logo/ascii/a/aros.txt
+new file mode 100644
+index 0000000..c6c4ad8
+--- /dev/null
++++ b/src/logo/ascii/a/aros.txt
+@@ -0,0 +1,7 @@
++$1   ###    #####     ###     ####
++$1  #   #   #    #   #   #   #
++$1  #####   #####    #   #    ###
++$1  #   #   #   #    #   #       #
++$1  #   #   #    #    ###    ####
++
++$2  AROS Research Operating System

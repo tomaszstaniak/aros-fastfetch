@@ -1,0 +1,85 @@
+.KEY BIN/A,CFG/A,OUT/A
+.BRA {
+.KET }
+; Guest checks of one fastfetch build, from an AROS Shell:
+;   Execute smoke.script BIN=RAM:ff/fastfetch CFG=RAM:ff/custom.jsonc OUT=RESULTS:<run directory>
+; Every result goes to its own file in OUT, each exit code right after its
+; command. Output is redirected throughout; the console runs (CON:, Limpet)
+; are separate and looked at on screen. ENVARC:fastfetch must not exist
+; before: the script creates it with --gen-config and deletes it again.
+FailAt 21
+MakeDir {OUT}
+Stack >{OUT}/stack.txt
+Date >{OUT}/date-start.txt
+; First start after boot: cold. --stat adds each module's time (guest clock).
+{BIN} --stat true >{OUT}/cold-stat.txt
+Echo $RC >{OUT}/cold-stat.rc
+{BIN} --stat true >{OUT}/warm-stat.txt
+Echo $RC >{OUT}/warm-stat.rc
+{BIN} --version >{OUT}/version.txt
+Echo $RC >{OUT}/version.rc
+{BIN} --help >{OUT}/help.txt
+Echo $RC >{OUT}/help.rc
+{BIN} --list-modules >{OUT}/list-modules.txt
+Echo $RC >{OUT}/list-modules.rc
+{BIN} --list-config-paths >{OUT}/list-config-paths.txt
+Echo $RC >{OUT}/list-config-paths.rc
+{BIN} >{OUT}/default.txt
+Echo $RC >{OUT}/default.rc
+{BIN} --format json >{OUT}/out.json
+Echo $RC >{OUT}/json.rc
+; Unsupported modules and data that is not there: reported, not zero.
+{BIN} --show-errors true --logo none -s GPU:Sound:Battery:Swap:LocalIp:Packages:DNS:Users >{OUT}/missing.txt
+Echo $RC >{OUT}/missing.rc
+; Configuration: written to ENVARC:, then read back.
+{BIN} --gen-config >{OUT}/gen-config.txt
+Echo $RC >{OUT}/gen-config.rc
+List ENVARC:fastfetch >{OUT}/gen-config-list.txt
+{BIN} --logo none >{OUT}/with-config.txt
+Echo $RC >{OUT}/with-config.rc
+Delete ENVARC:fastfetch ALL QUIET >{OUT}/gen-config-delete.txt
+{BIN} -c {CFG} >{OUT}/custom-config.txt
+Echo $RC >{OUT}/custom-config.rc
+; A preset from the package's share/fastfetch/presets (none beside a bare binary).
+{BIN} -c neofetch --logo none >{OUT}/preset.txt
+Echo $RC >{OUT}/preset.rc
+{BIN} --logo none -s Title:OS:Kernel:Shell:DE:WM:Terminal:Disk --disable-linewrap true >{OUT}/linewrap-redirected.txt
+Echo $RC >{OUT}/linewrap-redirected.rc
+; Repeated runs: memory before and after, exit codes, no process left.
+Avail FLUSH >{OUT}/avail-before.txt
+Date >{OUT}/repeat-start.txt
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+{BIN} >NIL:
+Echo $RC >>{OUT}/repeat.rc
+Date >{OUT}/repeat-end.txt
+Avail FLUSH >{OUT}/avail-after.txt
+Status >{OUT}/status.txt
+Echo "done" >{OUT}/done.txt
+Echo "smoke done"

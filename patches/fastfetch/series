@@ -1,0 +1,7 @@
+0001-logo-add-aros.patch
+0002-aros-build-the-aros-target-and-detect-its-data-n.patch
+0003-title-no-without-a-user-name.patch
+0004-stat-plain-time-lines-when-output-is-plain.patch
+0005-aros-ctrl-c-ends-dynamic-interval.patch
+0006-aros-report-the-gpu-module-s-own-answer.patch
+0007-aros-disable-linewrap-in-con.patch

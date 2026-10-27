@@ -1,0 +1,5 @@
+// A user configuration read with -c by smoke.script: three modules, no logo.
+{
+    "logo": { "type": "none" },
+    "modules": ["OS", "Kernel", "Shell"]
+}

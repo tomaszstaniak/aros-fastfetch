@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] AROS: report the GPU module's own answer
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: when the native GPU backend found nothing, ffDetectGPU went on to
+Vulkan, OpenCL and OpenGL fallbacks and then said "GPU detection failed",
+hiding why. None of those fallbacks is built for AROS.
+Solution: on AROS return the native backend's message.
+Scope: detection/gpu/gpu.c, AROS only.
+Upstream-Status: AROS-specific.
+Verification: --show-errors -s GPU on pool v1-1, v11-1 and rpi-1
+(2026-10-27): "GPU: Not supported on AROS".
+Removal: with an AROS GPU backend, or with upstream AROS support.
+---
+ src/detection/gpu/gpu.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/detection/gpu/gpu.c b/src/detection/gpu/gpu.c
+index 7031368..b1e266d 100644
+--- a/src/detection/gpu/gpu.c
++++ b/src/detection/gpu/gpu.c
+@@ -255,6 +255,11 @@ const char* ffDetectGPU(const FFGPUOptions* options, FFlist* result) {
+         FF_DEBUG("PCI/native GPU detection did not produce results (error=%s, gpuCount=%u)",
+             error ?: "none",
+             result->length);
++#ifdef __AROS__
++        // No Vulkan, OpenCL or OpenGL fallback is built for AROS: the
++        // native answer is the one to report.
++        return error ?: "No GPU found";
++#endif
+     }
+     if (options->detectionMethod <= FF_GPU_DETECTION_METHOD_VULKAN) {
+         FF_DEBUG("Trying Vulkan GPU detection fallback");
