@@ -47,7 +47,7 @@
         "memory",
         {
             "type": "disk",
-            "key": "Disk {mountpoint}"
+            "key": "Disk {name}"
         },
         "localip",
         "locale",

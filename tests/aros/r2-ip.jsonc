@@ -1,0 +1,5 @@
+// Read with -c by r2.script: every interface, with flags, as JSON.
+{
+    "logo": { "type": "none" },
+    "modules": [ { "type": "localip", "defaultRouteOnly": false, "showFlags": true } ]
+}

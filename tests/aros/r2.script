@@ -1,8 +1,8 @@
-.KEY BIN/A,OUT/A,CMD/A
+.KEY BIN/A,OUT/A,CMD/A,IP/A
 .BRA {
 .KET }
 ; Guest checks of the changes in 2.70.0-r2, after smoke.script:
-;   Execute r2.script BIN=fastfetch OUT=RESULTS:<run directory> CMD=RAM:ff/r2-command.jsonc
+;   Execute r2.script BIN=fastfetch OUT=RESULTS:<run directory> CMD=RAM:ff/r2-command.jsonc IP=RAM:ff/r2-ip.jsonc
 ; This file holds two ISO-8859-2 bytes (0xB1, 0xEA): the RAM: volume is
 ; renamed "Dysk Бъ" for the character set runs and named "Ram Disk"
 ; again after them; ENV:CHARSET is set for them and removed again.
@@ -14,7 +14,7 @@ Echo $RC >{OUT}/r2-config-paths.rc
 ; CPU cores and the default route, as data.
 {BIN} --format json -s CPU:LocalIp >{OUT}/r2-cpu-ip.json
 Echo $RC >{OUT}/r2-cpu-ip.rc
-{BIN} --format json -s LocalIp --localip-default-route-only false --localip-show-flags true >{OUT}/r2-ip-all.json
+{BIN} -c {IP} --format json >{OUT}/r2-ip-all.json
 Echo $RC >{OUT}/r2-ip-all.rc
 ; Command module: a program in a drawer with spaces, and three commands
 ; started before the first is read.

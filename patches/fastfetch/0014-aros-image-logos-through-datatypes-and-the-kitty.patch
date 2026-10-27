@@ -33,9 +33,9 @@ Removal: with the AROS backend.
 ---
  CMakeLists.txt                                |   6 +-
  .../terminalsize/terminalsize_aros.c          |  17 +-
- src/logo/image/image_aros.c                   | 260 ++++++++++++++++++
+ src/logo/image/image_aros.c                   | 270 ++++++++++++++++++
  src/logo/logo.c                               |  16 ++
- 4 files changed, 296 insertions(+), 3 deletions(-)
+ 4 files changed, 306 insertions(+), 3 deletions(-)
  create mode 100644 src/logo/image/image_aros.c
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
@@ -93,10 +93,10 @@ index 49b0631..c784e5e 100644
          return false;
 diff --git a/src/logo/image/image_aros.c b/src/logo/image/image_aros.c
 new file mode 100644
-index 0000000..0db8887
+index 0000000..46a240e
 --- /dev/null
 +++ b/src/logo/image/image_aros.c
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,270 @@
 +// Image logos on AROS: kitty and kitty-direct, both drawn the same way.
 +// The picture is decoded by the system's datatypes (any format a
 +// picture datatype reads: PNG, IFF ILBM, JPEG, ...), scaled here to whole
@@ -121,6 +121,7 @@ index 0000000..0db8887
 +#include <proto/datatypes.h>
 +#include <dos/dosextens.h>
 +#include <datatypes/pictureclass.h>
++#include <clib/alib_protos.h>
 +#include <limpet/limpet.h>
 +#include <stdio.h>
 +#include <stdlib.h>
@@ -161,8 +162,6 @@ index 0000000..0db8887
 +        if (!out->rgba) {
 +            error = "Not enough memory for the picture";
 +        } else {
-+            // A picture without alpha reads with alpha 0xff
-+            // (picture.datatype's RGB to RGBA conversion).
 +            struct pdtBlitPixelArray read = {
 +                .MethodID = PDTM_READPIXELARRAY,
 +                .pbpa_PixelData = out->rgba,
@@ -173,10 +172,21 @@ index 0000000..0db8887
 +                .pbpa_Width = out->width,
 +                .pbpa_Height = out->height,
 +            };
-+            if (!DoDTMethodA(o, nullptr, nullptr, (Msg) &read)) {
++            // DoMethodA, not DoDTMethodA: that goes through intuition's
++            // DoGadgetMethodA, which holds its GadgetLock for the whole
++            // method, and the conversion behind PDTM_READPIXELARRAY then
++            // stopped all input on mainline (2026-10-27; the machine had to
++            // be powered off). An object on no window needs no GadgetInfo.
++            if (!DoMethodA(o, (Msg) &read)) {
 +                free(out->rgba);
 +                out->rgba = nullptr;
 +                error = "The datatype could not deliver the pixels";
++            } else if (bmh->bmh_Masking != mskHasAlpha) {
++                // A picture without an alpha channel read as RGBA came back
++                // with alpha 0 (mainline, a PNG without alpha): opaque, then.
++                for (size_t i = 3; i < (size_t) out->width * out->height * 4; i += 4) {
++                    out->rgba[i] = 0xff;
++                }
 +            }
 +        }
 +    }

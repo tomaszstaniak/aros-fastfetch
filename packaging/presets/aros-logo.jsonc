@@ -25,6 +25,9 @@
         "key": {
             "width": 10
         },
+        "percent": {
+            "type": ["num", "bar"]
+        },
         "bar": {
             "width": 12,
             "border": null,
