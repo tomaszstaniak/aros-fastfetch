@@ -1,0 +1,25 @@
+.KEY CTL/A,OUT/A
+.BRA {
+.KET }
+; The memory control of smoke.script: fifteen runs of control.c, as the
+; fifteen fastfetch runs there, with Avail FLUSH before and after.
+;   Execute control.script CTL=<drawer>/control OUT=<results drawer>
+FailAt 21
+Avail FLUSH >{OUT}/control-avail-before.txt
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+{CTL} >NIL:
+Avail FLUSH >{OUT}/control-avail-after.txt
+Echo "control done"

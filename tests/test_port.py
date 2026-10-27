@@ -66,6 +66,13 @@ class OutputFilter(unittest.TestCase):
     def test_latin1_broken_utf8(self):
         self.assertEqual(self.run_filter(b"a\xe2\x82b\xffc", False, True), b"a?b?c")
 
+    def test_latin1_no_control_bytes(self):
+        # U+009B is CSI on an Amiga console; C0 9B is an overlong ESC; a
+        # surrogate and a raw C1 byte are no characters either.
+        data = b"<\xc2\x9b><\xc0\x9b><\xed\xa0\x80><\x9b>"
+        out = self.run_filter(data, False, True)
+        self.assertEqual(out, b"<?><?><?><?>")
+
     def test_latin1_sgr_left_alone_without_pens(self):
         self.assertEqual(self.run_filter(b"\x1b[31m\xc3\xa9", False, True), b"\x1b[31m\xe9")
 
@@ -120,9 +127,12 @@ int main(int argc, char** argv) {
 
 class PatchTooling(unittest.TestCase):
     def test_header_fields(self):
-        for field in ("Repository:", "Base:", "Problem:", "Solution:", "Scope:",
-                      "Upstream-Status:", "Verification:", "Removal:"):
-            self.assertIn(field, port.REQUIRED)
+        """Every saved patch carries every required header field."""
+        for name in port.series():
+            text = (ROOT / "patches" / "fastfetch" / name).read_text()
+            header = text.split("\n---\n", 1)[0]
+            for field in port.REQUIRED:
+                self.assertIn("\n" + field, header, f"{name}: {field}")
 
     def test_targets(self):
         self.assertEqual(port.TARGETS, ("aros-x86_64-abiv11-pc", "aros-x86_64-abiv1-pc",

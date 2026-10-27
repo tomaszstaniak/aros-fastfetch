@@ -8,6 +8,10 @@
 ; are separate and looked at on screen. ENVARC:fastfetch must not exist
 ; before: the script creates it with --gen-config and deletes it again.
 FailAt 21
+If EXISTS ENVARC:fastfetch
+  Echo "ENVARC:fastfetch exists: a configuration of the user's; not run"
+  Quit 20
+EndIf
 MakeDir {OUT}
 Stack >{OUT}/stack.txt
 Date >{OUT}/date-start.txt
@@ -45,39 +49,40 @@ Echo $RC >{OUT}/custom-config.rc
 Echo $RC >{OUT}/preset.rc
 {BIN} --logo none -s Title:OS:Kernel:Shell:DE:WM:Terminal:Disk --disable-linewrap true >{OUT}/linewrap-redirected.txt
 Echo $RC >{OUT}/linewrap-redirected.rc
-; Repeated runs: memory before and after, exit codes, no process left.
+; Repeated runs: memory before and after, exit codes (one file each:
+; appends to RESULTS: have been lost), no process left.
 Avail FLUSH >{OUT}/avail-before.txt
 Date >{OUT}/repeat-start.txt
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-01.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-02.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-03.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-04.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-05.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-06.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-07.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-08.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-09.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-10.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-11.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-12.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-13.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-14.rc
 {BIN} >NIL:
-Echo $RC >>{OUT}/repeat.rc
+Echo $RC >{OUT}/repeat-15.rc
 Date >{OUT}/repeat-end.txt
 Avail FLUSH >{OUT}/avail-after.txt
 Status >{OUT}/status.txt

@@ -46,10 +46,10 @@ index a4d2534..f88607a 100644
      interval.QuadPart = -(int64_t) msec * 10000; // Relative time in 100-nanosecond intervals
      return NT_SUCCESS(NtDelayExecution(TRUE, &interval));
 diff --git a/src/fastfetch.c b/src/fastfetch.c
-index 583a1f0..ac66156 100644
+index 283e174..5c5e334 100644
 --- a/src/fastfetch.c
 +++ b/src/fastfetch.c
-@@ -818,7 +818,12 @@ static void run(FFdata* data) {
+@@ -841,7 +841,12 @@ static void run(FFdata* data) {
              ffLogoPrintRemaining(); // `logoLineCacheClear` inside so that ffLogoPrintLine will use `\e[nC` to move the cursor to the right position instead of reprinting the logo
              fputs("\e[J", stdout); // Clear from cursor to the end of the screen to prevent artifacts when the new output is shorter than the previous one
              fflush(stdout);

@@ -33,7 +33,8 @@ Colours, the terminal's name and UTF-8 text depend on what the console
 reports through the Limpet capabilities contract on the actual output
 (Limpet 0.8.0 and later report all of them). The standard Shell window
 (CON:) gets plain ISO-8859-1 text. Redirected output and JSON contain no
-escape sequences.
+escape sequences, except with `--dynamic-interval`, which redraws the
+screen in place by definition.
 
 Modules without a reliable source on AROS (GPU, sound, battery, swap,
 themes, packages, DNS, users) report that they are not supported; the

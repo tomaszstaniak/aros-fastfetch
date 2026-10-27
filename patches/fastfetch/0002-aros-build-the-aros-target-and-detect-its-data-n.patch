@@ -14,10 +14,16 @@ facilities off, link through the SDK's own GCC driver, no full strip) and
 *_aros.c backends that ask AROS itself: exec, dos, graphics, intuition,
 locale, processor.resource, timer.device, bsdsocket.library (opened by the
 Local IP module only, so the program starts without a TCP/IP stack).
-Paths follow AmigaDOS (ENVARC:, ENV:, PROGDIR:; never "Vol:/file").
+Paths follow AmigaDOS (ENVARC:, ENV:, PROGDIR:; never "Vol:/file"; a
+program in a volume's root has the volume as its drawer). Names from
+AROS (volumes, fonts, locales, tasks, screen modes) are converted from
+ISO-8859-1 to UTF-8. Commands (the Command module) run through
+SystemTags with output in a T: file; the default "shell" is the AROS
+Shell itself, so the module's text is an AROS command line.
 Terminal capabilities come from the Limpet SDK's presentation and identity
 queries on the actual output handle; every stdout write passes one filter
-for Amiga pen colours and Latin-1 consoles. Modules without a reliable
+for Amiga pen colours and Latin-1 consoles (no C1 or malformed UTF-8
+reaches those); raw writes to standard output go through stdio too. Modules without a reliable
 source report "Not supported on AROS"; missing data stays missing.
 ABIv11 gets small replacements for POSIX calls its C library lacks.
 Scope: AROS only. Upstream files are touched only behind __AROS__ / the
@@ -32,38 +38,40 @@ aros-aarch64-abiv1-raspi; tests/aros/smoke.script and console runs on pool
 v1-1, v11-1 and rpi-1 (2026-10-27); host tests in tests/test_port.py.
 Removal: when upstream fastfetch supports AROS.
 ---
- CMakeLists.txt                                | 126 +++++++-
+ CMakeLists.txt                                | 126 ++++++-
  src/common/aros/aros_compat_abiv11.c          |  67 ++++
  src/common/aros/aros_compat_abiv11.h          |  35 ++
- src/common/aros/aros_output.c                 | 298 ++++++++++++++++++
+ src/common/aros/aros_output.c                 | 307 ++++++++++++++++++
  src/common/aros/aros_output.h                 |  42 +++
  src/common/aros/aros_sleep.c                  |  17 +
  src/common/aros/aros_sleep.h                  |   9 +
- src/common/aros/aros_terminal.c               |  86 +++++
- src/common/aros/aros_terminal.h               |  32 ++
- src/common/aros/aros_version.c                |  72 +++++
+ src/common/aros/aros_terminal.c               |  91 ++++++
+ src/common/aros/aros_terminal.h               |  36 ++
+ src/common/aros/aros_text.h                   |  32 ++
+ src/common/aros/aros_version.c                |  72 ++++
  src/common/aros/aros_version.h                |  15 +
  src/common/aros/genconfig_aros.c              |   8 +
- src/common/impl/FFPlatform_aros.c             | 110 +++++++
+ src/common/impl/FFPlatform_aros.c             | 113 +++++++
  src/common/impl/binary_aros.c                 |  25 ++
  src/common/impl/io_unix.c                     |  13 +-
  src/common/impl/netif_aros.c                  |  10 +
  src/common/impl/networking_aros.c             |  13 +
- src/common/impl/processing_aros.c             | 105 ++++++
+ src/common/impl/processing_aros.c             | 125 +++++++
+ src/common/io.h                               |   8 +
  src/common/netif.h                            |   6 +
  src/detection/codec/codec_aros.c              |   5 +
- src/detection/cpu/cpu_aros.c                  |  36 +++
+ src/detection/cpu/cpu_aros.c                  |  37 +++
  src/detection/cpuusage/cpuusage_aros.c        |   6 +
- src/detection/de/de_aros.c                    |  18 ++
+ src/detection/de/de_aros.c                    |  18 +
  src/detection/disk/disk.c                     |  24 +-
  src/detection/disk/disk.h                     |   3 +-
- src/detection/disk/disk_aros.c                | 150 +++++++++
- .../displayserver/displayserver_aros.c        |  67 ++++
+ src/detection/disk/disk_aros.c                | 154 +++++++++
+ .../displayserver/displayserver_aros.c        |  68 ++++
  src/detection/dns/dns_aros.c                  |   6 +
- src/detection/font/font_aros.c                |  46 +++
+ src/detection/font/font_aros.c                |  47 +++
  src/detection/gpu/gpu_aros.c                  |   7 +
  src/detection/initsystem/initsystem_aros.c    |   5 +
- src/detection/locale/locale_aros.c            |  39 +++
+ src/detection/locale/locale_aros.c            |  40 +++
  src/detection/localip/localip_aros.c          | 155 +++++++++
  src/detection/media/media_aros.c              |   5 +
  src/detection/memory/memory_aros.c            |  14 +
@@ -74,7 +82,7 @@ Removal: when upstream fastfetch supports AROS.
  src/detection/sound/sound_aros.c              |   5 +
  src/detection/swap/swap_aros.c                |   6 +
  .../terminalfont/terminalfont_aros.c          |   7 +
- .../terminalshell/terminalshell_aros.c        | 121 +++++++
+ .../terminalshell/terminalshell_aros.c        | 128 ++++++++
  .../terminalsize/terminalsize_aros.c          |  15 +
  src/detection/top/top_aros.c                  |   5 +
  src/detection/uptime/uptime_aros.c            |  29 ++
@@ -82,11 +90,12 @@ Removal: when upstream fastfetch supports AROS.
  src/detection/version/version.c               |   2 +
  src/detection/wallpaper/wallpaper_aros.c      |   5 +
  src/detection/wmtheme/wmtheme_aros.c          |   6 +
- src/fastfetch.c                               |   5 +
+ src/fastfetch.c                               |  28 ++
  src/modules/colors/colors.c                   |   8 +
+ src/modules/command/command.c                 |   4 +
  src/modules/disk/disk.c                       |   4 +-
  src/options/display.c                         |  10 +
- 54 files changed, 1982 insertions(+), 7 deletions(-)
+ 57 files changed, 2105 insertions(+), 7 deletions(-)
  create mode 100644 src/common/aros/aros_compat_abiv11.c
  create mode 100644 src/common/aros/aros_compat_abiv11.h
  create mode 100644 src/common/aros/aros_output.c
@@ -95,6 +104,7 @@ Removal: when upstream fastfetch supports AROS.
  create mode 100644 src/common/aros/aros_sleep.h
  create mode 100644 src/common/aros/aros_terminal.c
  create mode 100644 src/common/aros/aros_terminal.h
+ create mode 100644 src/common/aros/aros_text.h
  create mode 100644 src/common/aros/aros_version.c
  create mode 100644 src/common/aros/aros_version.h
  create mode 100644 src/common/aros/genconfig_aros.c
@@ -406,10 +416,10 @@ index 0000000..f2ba12f
 +#define getline ffArosGetline
 diff --git a/src/common/aros/aros_output.c b/src/common/aros/aros_output.c
 new file mode 100644
-index 0000000..e2dfbd8
+index 0000000..b263baf
 --- /dev/null
 +++ b/src/common/aros/aros_output.c
-@@ -0,0 +1,298 @@
+@@ -0,0 +1,307 @@
 +// The stdout filter of aros_output.h. This file calls the real stdio
 +// functions, so the macros of the forced include are removed first.
 +#undef fwrite
@@ -439,7 +449,7 @@ index 0000000..e2dfbd8
 +    enum { IN_TEXT, IN_ESCAPE, IN_CSI } state;
 +    char sequence[64];
 +    size_t length;
-+    uint32_t scalar;
++    uint32_t scalar, minimum; // minimum: below it the form is overlong
 +    unsigned pending; // continuation bytes still to come
 +} filter;
 +
@@ -512,7 +522,9 @@ index 0000000..e2dfbd8
 +static void emitScalar(uint32_t scalar) {
 +    char c = '?';
 +    const char* s = nullptr;
-+    if (scalar < 0x100) {
++    if (scalar >= 0x80 && scalar < 0xA0) {
++        c = '?'; // C1 controls: 0x9B is CSI on an Amiga console
++    } else if (scalar < 0x100) {
 +        c = (char) scalar;
 +    } else if (scalar == 0x2010 || scalar == 0x2011 || scalar == 0x2013 || scalar == 0x2014 || scalar == 0x2212) {
 +        c = '-';
@@ -539,7 +551,11 @@ index 0000000..e2dfbd8
 +    if (filter.pending && (b & 0xC0) == 0x80) {
 +        filter.scalar = (filter.scalar << 6) | (b & 0x3F);
 +        if (--filter.pending == 0) {
-+            emitScalar(filter.scalar);
++            // Overlong forms ("C0 9B" for ESC), surrogates and values past
++            // U+10FFFF are no characters.
++            bool valid = filter.scalar >= filter.minimum && filter.scalar <= 0x10FFFF &&
++                         !(filter.scalar >= 0xD800 && filter.scalar <= 0xDFFF);
++            emitScalar(valid ? filter.scalar : '?');
 +        }
 +        return;
 +    }
@@ -549,12 +565,15 @@ index 0000000..e2dfbd8
 +    }
 +    if ((b & 0xE0) == 0xC0) {
 +        filter.scalar = b & 0x1F;
++        filter.minimum = 0x80;
 +        filter.pending = 1;
 +    } else if ((b & 0xF0) == 0xE0) {
 +        filter.scalar = b & 0x0F;
++        filter.minimum = 0x800;
 +        filter.pending = 2;
 +    } else if ((b & 0xF8) == 0xF0) {
 +        filter.scalar = b & 0x07;
++        filter.minimum = 0x10000;
 +        filter.pending = 3;
 +    } else {
 +        emit("?", 1);
@@ -796,10 +815,10 @@ index 0000000..5068886
 +bool ffArosSleep(uint32_t msec);
 diff --git a/src/common/aros/aros_terminal.c b/src/common/aros/aros_terminal.c
 new file mode 100644
-index 0000000..f0f956c
+index 0000000..6cf1fdd
 --- /dev/null
 +++ b/src/common/aros/aros_terminal.c
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,91 @@
 +// The real fflush: this file runs before the first write and must not
 +// recurse into the output filter.
 +#undef fflush
@@ -864,6 +883,11 @@ index 0000000..f0f956c
 +    return state.answered && limpet_text_utf8(&state.presentation);
 +}
 +
++bool ffArosTerminalUnanswered(void) {
++    ask();
++    return !state.answered && state.handler[0] != 0;
++}
++
 +bool ffArosTerminalLatin1(void) {
 +    ask();
 +    if (!state.answered) {
@@ -888,10 +912,10 @@ index 0000000..f0f956c
 +}
 diff --git a/src/common/aros/aros_terminal.h b/src/common/aros/aros_terminal.h
 new file mode 100644
-index 0000000..6902f5c
+index 0000000..c468293
 --- /dev/null
 +++ b/src/common/aros/aros_terminal.h
-@@ -0,0 +1,32 @@
+@@ -0,0 +1,36 @@
 +#pragma once
 +
 +// What the console behind the output says it renders, asked once through
@@ -909,6 +933,10 @@ index 0000000..6902f5c
 +// Plain text without any escape sequence: the console did not confirm
 +// colours, or the output is not a console.
 +bool ffArosTerminalPlain(void);
++// An interactive console that did not answer the query: CON: or another
++// Amiga console. It takes console.device's sequences (CSI > 7 l), not
++// those of xterm.
++bool ffArosTerminalUnanswered(void);
 +// The console confirmed UTF-8 decoding.
 +bool ffArosTerminalUtf8(void);
 +// Text for this console must be ISO-8859-1: an interactive console that did
@@ -924,6 +952,44 @@ index 0000000..6902f5c
 +// Name of the task that handles the output's console, e.g. "CON"; "" if
 +// the output is not a console. Not a capability: for the Terminal module.
 +const char* ffArosTerminalHandlerTask(void);
+diff --git a/src/common/aros/aros_text.h b/src/common/aros/aros_text.h
+new file mode 100644
+index 0000000..1fc027b
+--- /dev/null
++++ b/src/common/aros/aros_text.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include "common/FFstrbuf.h"
++#include <stddef.h>
++#include <string.h>
++
++// AROS names (volumes, fonts, locales, tasks, screen modes) are ISO-8859-1,
++// and fastfetch keeps UTF-8: its output filter and the JSON writer read
++// every string as UTF-8, so a raw "Größe:" would come out as "Gr??e" in
++// CON: and make the JSON invalid. Each byte from 0x80 becomes two.
++static inline void ffArosStrbufSetLatin1N(FFstrbuf* out, const char* text, size_t length) {
++    ffStrbufClear(out);
++    for (size_t i = 0; i < length; ++i) {
++        unsigned char c = (unsigned char) text[i];
++        if (c < 0x80) {
++            ffStrbufAppendC(out, (char) c);
++        } else {
++            ffStrbufAppendC(out, (char) (0xC0 | (c >> 6)));
++            ffStrbufAppendC(out, (char) (0x80 | (c & 0x3F)));
++        }
++    }
++}
++
++static inline void ffArosStrbufSetLatin1(FFstrbuf* out, const char* text) {
++    ffArosStrbufSetLatin1N(out, text, strlen(text));
++}
++
++static inline void ffArosStrbufAppendLatin1N(FFstrbuf* out, const char* text, size_t length) {
++    FF_STRBUF_AUTO_DESTROY part = ffStrbufCreate();
++    ffArosStrbufSetLatin1N(&part, text, length);
++    ffStrbufAppend(out, &part);
++}
 diff --git a/src/common/aros/aros_version.c b/src/common/aros/aros_version.c
 new file mode 100644
 index 0000000..2ece21f
@@ -1039,11 +1105,12 @@ index 0000000..03b817c
 +}
 diff --git a/src/common/impl/FFPlatform_aros.c b/src/common/impl/FFPlatform_aros.c
 new file mode 100644
-index 0000000..feaba22
+index 0000000..bdd85e0
 --- /dev/null
 +++ b/src/common/impl/FFPlatform_aros.c
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,113 @@
 +#include "FFPlatform_private.h"
++#include "common/aros/aros_text.h"
 +#include "common/FFstrbuf.h"
 +#include "common/io.h"
 +
@@ -1084,7 +1151,8 @@ index 0000000..feaba22
 +static void nameOfLock(BPTR lock, FFstrbuf* out) {
 +    char name[1024];
 +    if (lock && NameFromLock(lock, (STRPTR) name, sizeof(name))) {
-+        ffStrbufSetS(out, name);
++        // For display and JSON only: files are found through PROGDIR:.
++        ffArosStrbufSetLatin1(out, name);
 +        ensureDir(out);
 +    }
 +}
@@ -1117,7 +1185,8 @@ index 0000000..feaba22
 +    if (platform->exePath.length) {
 +        char program[256];
 +        if (GetProgramName((STRPTR) program, sizeof(program))) {
-+            ffStrbufAppendS(&platform->exePath, (const char*) FilePart((STRPTR) program));
++            const char* file = (const char*) FilePart((STRPTR) program);
++            ffArosStrbufAppendLatin1N(&platform->exePath, file, strlen(file));
 +        }
 +    }
 +    // Presets and logos: PROGDIR:share/fastfetch/..., as on other systems.
@@ -1132,12 +1201,12 @@ index 0000000..feaba22
 +    // A single-user system: a name only when the user has set one.
 +    const char* user = getenv("USER");
 +    if (user && *user) {
-+        ffStrbufSetS(&platform->userName, user);
++        ffArosStrbufSetLatin1(&platform->userName, user);
 +    }
 +
 +    struct utsname u;
 +    if (uname(&u) == 0) {
-+        ffStrbufSetS(&platform->hostName, u.nodename);
++        ffArosStrbufSetLatin1(&platform->hostName, u.nodename);
 +        ffStrbufSetS(&platform->sysinfo.version, u.version);
 +    }
 +    ffStrbufSetStatic(&platform->userShell, "Shell");
@@ -1259,10 +1328,10 @@ index 0000000..48e52f6
 +}
 diff --git a/src/common/impl/processing_aros.c b/src/common/impl/processing_aros.c
 new file mode 100644
-index 0000000..4df01ff
+index 0000000..ecc3e42
 --- /dev/null
 +++ b/src/common/impl/processing_aros.c
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,125 @@
 +#include "common/processing.h"
 +#include "common/io.h"
 +
@@ -1277,6 +1346,16 @@ index 0000000..4df01ff
 +// AROS has no fork, pipes between C programs or posix_spawn. A command runs
 +// to completion through SystemTags with its output in a file in T:, which
 +// ffProcessReadOutput reads and deletes. pid carries the return code.
++//
++// An empty argv[0] means the AROS Shell itself: argv[1] is a command line,
++// passed as it is (the Command module's default on AROS, which has no
++// /bin/sh -c). Otherwise argv[0] is a command looked up in the Shell's path
++// and the other arguments are quoted.
++
++// One file per task: a task runs one command at a time.
++static void outputPath(char* path, size_t size) {
++    snprintf(path, size, "T:fastfetch-%p.out", (void*) FindTask(nullptr));
++}
 +
 +static bool appendQuoted(char* line, size_t size, size_t* length, const char* arg) {
 +    // AROS Shell quoting: "..." with *" for a quote and ** for a star.
@@ -1304,19 +1383,31 @@ index 0000000..4df01ff
 +const char* ffProcessSpawn(char* const argv[], FFProcessOutputType useOutput, [[maybe_unused]] FFNativeFD stdinFd, FFProcessHandle* outHandle) {
 +    char line[2048] = "";
 +    size_t length = 0;
-+    // The program name is not quoted: the Shell looks it up in its path.
-+    if (!argv[0] || strlen(argv[0]) + 2 >= sizeof(line)) {
-+        return "Command is too long";
++    unsigned first = 1;
++    if (!argv[0]) {
++        return "No command";
 +    }
-+    length = (size_t) snprintf(line, sizeof(line), "%s ", argv[0]);
-+    for (unsigned i = 1; argv[i]; ++i) {
++    if (!argv[0][0]) {
++        if (!argv[1] || strlen(argv[1]) + 2 >= sizeof(line) || strchr(argv[1], '\n')) {
++            return "Command is too long or contains a line feed";
++        }
++        length = (size_t) snprintf(line, sizeof(line), "%s ", argv[1]);
++        first = 2;
++    } else {
++        // The program name is not quoted: the Shell looks it up in its path.
++        if (strlen(argv[0]) + 2 >= sizeof(line)) {
++            return "Command is too long";
++        }
++        length = (size_t) snprintf(line, sizeof(line), "%s ", argv[0]);
++    }
++    for (unsigned i = first; argv[i - 1] && argv[i]; ++i) {
 +        if (!appendQuoted(line, sizeof(line), &length, argv[i])) {
 +            return "Command is too long or contains a line feed";
 +        }
 +    }
 +
 +    char path[64];
-+    snprintf(path, sizeof(path), "T:fastfetch-%p.out", (void*) FindTask(nullptr));
++    outputPath(path, sizeof(path));
 +    BPTR output = Open((CONST_STRPTR) path, MODE_NEWFILE);
 +    if (!output) {
 +        return "Cannot create the command's output file in T:";
@@ -1324,33 +1415,28 @@ index 0000000..4df01ff
 +    BPTR input = Open((CONST_STRPTR) "NIL:", MODE_OLDFILE);
 +    // Without the stdout bit the command's output goes to NIL:; AROS
 +    // programs write errors to the same handle, so stderr follows stdout.
-+    BPTR target = output;
-+    BPTR nil = 0;
-+    if (!(useOutput & FF_PROCESS_OUTPUT_STDOUT_BIT)) {
-+        nil = Open((CONST_STRPTR) "NIL:", MODE_NEWFILE);
-+        target = nil;
-+    }
-+    LONG rc = SystemTags((CONST_STRPTR) line, SYS_Input, (IPTR) input, SYS_Output, (IPTR) target,
++    BPTR nil = (useOutput & FF_PROCESS_OUTPUT_STDOUT_BIT) ? 0 : Open((CONST_STRPTR) "NIL:", MODE_NEWFILE);
++    LONG rc = SystemTags((CONST_STRPTR) line, SYS_Input, (IPTR) input, SYS_Output, (IPTR) (nil ? nil : output),
 +                         NP_StackSize, 65536, TAG_DONE);
++    // A synchronous SystemTags closes only handles it opened itself: these
++    // are ours, whether the command ran or not. The output file must be
++    // closed before it can be read again (RAM: refuses a second open of a
++    // MODE_NEWFILE file) and before it can be deleted.
++    if (input) {
++        Close(input);
++    }
++    if (nil) {
++        Close(nil);
++    }
++    Close(output);
 +    if (rc == -1) {
-+        // The handles were not taken over by a new process.
-+        if (input) {
-+            Close(input);
-+        }
-+        if (nil) {
-+            Close(nil);
-+        }
-+        Close(output);
 +        DeleteFile((CONST_STRPTR) path);
 +        return "SystemTags() failed";
 +    }
-+    if (nil) {
-+        Close(output);
-+    }
 +    outHandle->pid = (pid_t) rc;
 +    outHandle->pipeRead = open(path, O_RDONLY);
-+    DeleteFile((CONST_STRPTR) path); // the open descriptor keeps it readable on RAM: and SFS
 +    if (outHandle->pipeRead < 0) {
++        DeleteFile((CONST_STRPTR) path);
 +        return "Cannot read the command's output";
 +    }
 +    return nullptr;
@@ -1360,6 +1446,9 @@ index 0000000..4df01ff
 +    bool ok = ffAppendFDBuffer(handle->pipeRead, buffer);
 +    close(handle->pipeRead);
 +    handle->pipeRead = -1;
++    char path[64];
++    outputPath(path, sizeof(path));
++    DeleteFile((CONST_STRPTR) path); // closed now, so it can go
 +    if (!ok) {
 +        return "Reading the command's output failed";
 +    }
@@ -1368,6 +1457,25 @@ index 0000000..4df01ff
 +    }
 +    return nullptr;
 +}
+diff --git a/src/common/io.h b/src/common/io.h
+index 78da571..cdb94c3 100644
+--- a/src/common/io.h
++++ b/src/common/io.h
+@@ -71,6 +71,14 @@ static inline FFNativeFD FFUnixFD2NativeFD(int unixfd) {
+ 
+ [[gnu::nonnull(3)]]
+ static inline bool ffWriteFDData(FFNativeFD fd, size_t dataSize, const void* data) {
++#ifdef __AROS__
++    // Standard output goes through stdio, so it stays in order with the
++    // buffered text and passes the console filter (aros_output.h): pens,
++    // Latin-1.
++    if (fd == STDOUT_FILENO) {
++        return fwrite(data, 1, dataSize, stdout) == dataSize;
++    }
++#endif
+ #ifndef _WIN32
+     return write(fd, data, dataSize) != -1;
+ #else
 diff --git a/src/common/netif.h b/src/common/netif.h
 index 75735f5..3cceeea 100644
 --- a/src/common/netif.h
@@ -1397,11 +1505,12 @@ index 0000000..43f78ae
 +}
 diff --git a/src/detection/cpu/cpu_aros.c b/src/detection/cpu/cpu_aros.c
 new file mode 100644
-index 0000000..49040d0
+index 0000000..6e337a8
 --- /dev/null
 +++ b/src/detection/cpu/cpu_aros.c
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,37 @@
 +#include "cpu.h"
++#include "common/aros/aros_text.h"
 +#include "common/strutil.h"
 +
 +#include <proto/exec.h>
@@ -1424,7 +1533,7 @@ index 0000000..49040d0
 +    if (!model || !*model || ffStrEqualsIgnCase((const char*) model, "Unknown")) {
 +        return "processor.resource does not name this processor";
 +    }
-+    ffStrbufSetS(&cpu->name, (const char*) model);
++    ffArosStrbufSetLatin1(&cpu->name, (const char*) model);
 +    // Processors the system found; whether exec schedules on all of them
 +    // (an SMP build) is not reported here.
 +    cpu->coresPhysical = cpu->coresLogical = cpu->coresOnline = (uint16_t) count;
@@ -1524,11 +1633,12 @@ index 2dea21e..bf21ab7 100644
      #define FF_DISK_FOLDER_SEPARATOR ':'
 diff --git a/src/detection/disk/disk_aros.c b/src/detection/disk/disk_aros.c
 new file mode 100644
-index 0000000..0f7756f
+index 0000000..5075cb4
 --- /dev/null
 +++ b/src/detection/disk/disk_aros.c
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,154 @@
 +#include "disk.h"
++#include "common/aros/aros_text.h"
 +#include "common/strutil.h"
 +
 +#include <proto/exec.h>
@@ -1662,10 +1772,13 @@ index 0000000..0f7756f
 +        disk->filesUsed = 0;
 +        disk->filesTotal = 0;
 +        disk->createTime = 0;
-+        ffStrbufInitS(&disk->mountFrom, names[i].device);
-+        ffStrbufInitS(&disk->mountpoint, path);
++        ffStrbufInit(&disk->mountFrom);
++        ffArosStrbufSetLatin1(&disk->mountFrom, names[i].device);
++        ffStrbufInit(&disk->mountpoint);
++        ffArosStrbufSetLatin1(&disk->mountpoint, path);
 +        ffStrbufInitMove(&disk->filesystem, &fs);
-+        ffStrbufInitNS(&disk->name, (uint32_t) strlen(path) - 1, path);
++        ffStrbufInit(&disk->name);
++        ffArosStrbufSetLatin1N(&disk->name, path, strlen(path) - 1);
 +        disk->type = FF_DISK_VOLUME_TYPE_REGULAR_BIT;
 +        // The RAM disk grows with its contents: its "size" is free memory.
 +        if (ffStrEquals(names[i].device, "RAM:")) {
@@ -1680,11 +1793,12 @@ index 0000000..0f7756f
 +}
 diff --git a/src/detection/displayserver/displayserver_aros.c b/src/detection/displayserver/displayserver_aros.c
 new file mode 100644
-index 0000000..51d1f05
+index 0000000..c268bf4
 --- /dev/null
 +++ b/src/detection/displayserver/displayserver_aros.c
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,68 @@
 +#include "displayserver.h"
++#include "common/aros/aros_text.h"
 +#include "common/strutil.h"
 +
 +#include <proto/exec.h>
@@ -1742,7 +1856,7 @@ index 0000000..51d1f05
 +    FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
 +    struct NameInfo info;
 +    if (mode != (ULONG) INVALID_ID && GetDisplayInfoData(nullptr, (UBYTE*) &info, sizeof(info), DTAG_NAME, mode)) {
-+        ffStrbufSetS(&name, (const char*) info.Name);
++        ffArosStrbufSetLatin1(&name, (const char*) info.Name);
 +    }
 +    FFDisplayResult* display = ffdsAppendDisplay(ds, (uint32_t) screen->Width, (uint32_t) screen->Height, 0, 0, 0, 0, 0, 0,
 +                                                 &name, FF_DISPLAY_TYPE_UNKNOWN, true, mode, 0, 0, "graphics.library");
@@ -1765,11 +1879,12 @@ index 0000000..69ea2d4
 +}
 diff --git a/src/detection/font/font_aros.c b/src/detection/font/font_aros.c
 new file mode 100644
-index 0000000..8271c98
+index 0000000..035e271
 --- /dev/null
 +++ b/src/detection/font/font_aros.c
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,47 @@
 +#include "font.h"
++#include "common/aros/aros_text.h"
 +
 +#include <proto/exec.h>
 +#include <proto/intuition.h>
@@ -1786,7 +1901,7 @@ index 0000000..8271c98
 +    if (n > 5 && strcmp(name + n - 5, ".font") == 0) {
 +        n -= 5;
 +    }
-+    ffStrbufSetNS(out, (uint32_t) n, name);
++    ffArosStrbufSetLatin1N(out, name, n);
 +    ffStrbufAppendF(out, " %u", size);
 +}
 +
@@ -1841,11 +1956,12 @@ index 0000000..64fd091
 +}
 diff --git a/src/detection/locale/locale_aros.c b/src/detection/locale/locale_aros.c
 new file mode 100644
-index 0000000..79bb385
+index 0000000..4b73e08
 --- /dev/null
 +++ b/src/detection/locale/locale_aros.c
-@@ -0,0 +1,39 @@
+@@ -0,0 +1,40 @@
 +#include "locale.h"
++#include "common/aros/aros_text.h"
 +
 +#include <proto/exec.h>
 +#include <proto/locale.h>
@@ -1857,7 +1973,7 @@ index 0000000..79bb385
 +    if (n > s && strcmp(name + n - s, suffix) == 0) {
 +        n -= s;
 +    }
-+    ffStrbufAppendNS(out, (uint32_t) n, name);
++    ffArosStrbufAppendLatin1N(out, name, n);
 +}
 +
 +const char* ffDetectLocale(FFstrbuf* result) {
@@ -2218,11 +2334,12 @@ index 0000000..fb03a8b
 +}
 diff --git a/src/detection/terminalshell/terminalshell_aros.c b/src/detection/terminalshell/terminalshell_aros.c
 new file mode 100644
-index 0000000..a02fdae
+index 0000000..f55d99b
 --- /dev/null
 +++ b/src/detection/terminalshell/terminalshell_aros.c
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,128 @@
 +#include "terminalshell.h"
++#include "common/aros/aros_text.h"
 +#include "common/FFcache.h"
 +#include "common/aros/aros_terminal.h"
 +#include "common/strutil.h"
@@ -2324,12 +2441,18 @@ index 0000000..a02fdae
 +            base = p + 1;
 +        }
 +    }
-+    ffStrbufSetS(&result->processName, *base ? base : task);
++    ffArosStrbufSetLatin1(&result->processName, *base ? base : task);
 +    if (ffStrContainsC(task, ':')) {
-+        ffStrbufSetS(&result->exePath, task);
++        ffArosStrbufSetLatin1(&result->exePath, task);
 +        ffStrbufSet(&result->exe, &result->exePath);
 +    }
-+    result->exeName = result->exe.length ? result->exe.chars + (base - task) : result->exe.chars;
++    // The file part of exe, which is UTF-8 now, not of the raw task name.
++    result->exeName = result->exe.chars;
++    for (const char* p = result->exe.chars; *p; ++p) {
++        if (*p == ':' || *p == '/') {
++            result->exeName = p + 1;
++        }
++    }
 +    const LimpetIdentity* id = ffArosTerminalIdentity();
 +    if (id) {
 +        ffStrbufSetS(&result->prettyName, id->name);
@@ -2459,10 +2582,55 @@ index 0000000..2f01eb2
 +    return false;
 +}
 diff --git a/src/fastfetch.c b/src/fastfetch.c
-index 4591301..583a1f0 100644
+index 4591301..283e174 100644
 --- a/src/fastfetch.c
 +++ b/src/fastfetch.c
-@@ -606,6 +606,11 @@ static void genConfigCommon(FFdata* data, const char* value) {
+@@ -1,4 +1,16 @@
+ #include "fastfetch.h"
++
++#ifdef __AROS__
++// The length of the drawer part of an AmigaDOS path, separator included:
++// "Work:Fastfetch/fastfetch" -> "Work:Fastfetch/", "Work:fastfetch" -> "Work:".
++static uint32_t ffArosDrawerLength(const FFstrbuf* path) {
++    uint32_t i = path->length;
++    while (i > 0 && path->chars[i - 1] != '/' && path->chars[i - 1] != ':') {
++        --i;
++    }
++    return i;
++}
++#endif
+ #include "common/ffdata.h"
+ #include "detection/version/version.h"
+ #include "logo/logo.h"
+@@ -337,8 +349,15 @@ static void listAvailablePresets(bool pretty) {
+ 
+     if (instance.state.platform.exePath.length) {
+         FF_STRBUF_AUTO_DESTROY absolutePath = ffStrbufCreateCopy(&instance.state.platform.exePath);
++#ifdef __AROS__
++        // "Vol:prog" is in the volume's root: its drawer is "Vol:", and
++        // "Vol:/presets/" would be the root's parent.
++        ffStrbufSubstrBefore(&absolutePath, ffArosDrawerLength(&absolutePath));
++        ffStrbufAppendS(&absolutePath, "presets/");
++#else
+         ffStrbufSubstrBeforeLastC(&absolutePath, '/');
+         ffStrbufAppendS(&absolutePath, "/presets/");
++#endif
+         ffListFilesRecursively(absolutePath.chars, pretty);
+     }
+ }
+@@ -553,7 +572,11 @@ static void optionParseConfigFile(FFdata* data, const char* key, const char* val
+     // Try to load as a relative path with the directory of fastfetch binary, for Windows support
+ 
+     if (instance.state.platform.exePath.length) {
++#ifdef __AROS__
++        uint32_t lastSlash = ffArosDrawerLength(&instance.state.platform.exePath);
++#else
+         uint32_t lastSlash = ffStrbufLastIndexC(&instance.state.platform.exePath, '/') + 1;
++#endif
+         assert(lastSlash < instance.state.platform.exePath.length);
+ 
+         // Try {exePath}/
+@@ -606,6 +629,11 @@ static void genConfigCommon(FFdata* data, const char* value) {
          #ifdef _WIN32
              && ffIsWindows10OrGreater()
          #endif
@@ -2493,6 +2661,28 @@ index bbb29a6..ab321a4 100644
      FF_STRBUF_AUTO_DESTROY result = ffStrbufCreateA(128);
  
      if (options->symbol == FF_COLORS_SYMBOL_BLOCK || options->symbol == FF_COLORS_SYMBOL_BACKGROUND) {
+diff --git a/src/modules/command/command.c b/src/modules/command/command.c
+index 9d89f41..7c7ce47 100644
+--- a/src/modules/command/command.c
++++ b/src/modules/command/command.c
+@@ -185,6 +185,8 @@ void ffInitCommandOptions(FFCommandOptions* options) {
+     ffStrbufInitStatic(&options->shell,
+ #ifdef _WIN32
+         "cmd.exe"
++#elif defined(__AROS__)
++        "" // the AROS Shell: the text is a command line (processing_aros.c)
+ #else
+         "/bin/sh"
+ #endif
+@@ -192,6 +194,8 @@ void ffInitCommandOptions(FFCommandOptions* options) {
+     ffStrbufInitStatic(&options->param,
+ #ifdef _WIN32
+         "/d/c"
++#elif defined(__AROS__)
++        ""
+ #else
+         "-c"
+ #endif
 diff --git a/src/modules/disk/disk.c b/src/modules/disk/disk.c
 index b3176fe..92bc6a5 100644
 --- a/src/modules/disk/disk.c

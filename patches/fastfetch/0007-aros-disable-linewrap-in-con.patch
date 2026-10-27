@@ -8,9 +8,11 @@ Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
 Problem: --disable-linewrap is off in pipe mode, and CON: is written in
 pipe mode because it shows no ANSI colours; a request to keep long lines
 to one row had no effect there.
-Solution: on an interactive AROS console that is written plain, use the
-Amiga console's own mode (console.device CSI > 7 l, restored with
-CSI > 7 h). Redirected output still gets no sequence.
+Solution: on an interactive AROS console that did not answer the
+capability query (CON: and other Amiga consoles), use the Amiga console's
+own mode (console.device CSI > 7 l, restored with CSI > 7 h). A terminal
+that answered keeps the DEC mode when it takes colours. Redirected output
+still gets no sequence.
 Scope: common/impl/init.c, AROS only. Terminals that take colours (Limpet)
 keep the DEC mode CSI ? 7 l as before.
 Upstream-Status: AROS-specific.
@@ -18,11 +20,11 @@ Verification: --disable-linewrap true in CON: on pool v1-1 and v11-1
 (2026-10-27): long lines stayed on one row; redirected output had no ESC.
 Removal: with upstream AROS support.
 ---
- src/common/impl/init.c | 23 +++++++++++++++++++++--
- 1 file changed, 21 insertions(+), 2 deletions(-)
+ src/common/impl/init.c | 24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
 
 diff --git a/src/common/impl/init.c b/src/common/impl/init.c
-index d6758ba..99691c0 100644
+index d6758ba..8aa4896 100644
 --- a/src/common/impl/init.c
 +++ b/src/common/impl/init.c
 @@ -77,10 +77,18 @@ void ffInitInstance(void) {
@@ -45,16 +47,17 @@ index d6758ba..99691c0 100644
      }
  
      if (ffHideCursor) {
-@@ -111,6 +119,17 @@ static void exitSignalHandler([[maybe_unused]] int signal) {
+@@ -111,6 +119,18 @@ static void exitSignalHandler([[maybe_unused]] int signal) {
  void ffStart(void) {
      ffDisableLinewrap = instance.config.display.disableLinewrap && !instance.config.display.pipe;
      ffHideCursor = instance.config.display.hideCursor && !instance.config.display.pipe;
 +#ifdef __AROS__
 +    // CON: gets plain text, yet it is an interactive console: there the
 +    // request is honoured with the Amiga console's own mode (console.device
-+    // CSI > 7 l / h). Redirected output gets no sequence at all.
-+    if (instance.config.display.disableLinewrap && instance.config.display.pipe && ffArosTerminalPlain() &&
-+        *ffArosTerminalHandlerTask()) {
++    // CSI > 7 l / h). A terminal that answered the query gets the DEC mode
++    // when it takes colours, and nothing otherwise; redirected output gets
++    // no sequence at all.
++    if (instance.config.display.disableLinewrap && instance.config.display.pipe && ffArosTerminalUnanswered()) {
 +        ffDisableLinewrap = true;
 +        ffLinewrapOff = "\033[>7l";
 +        ffLinewrapOn = "\033[>7h";
@@ -63,7 +66,7 @@ index d6758ba..99691c0 100644
  
  #ifdef _WIN32
      SetErrorMode(SEM_FAILCRITICALERRORS);
-@@ -147,7 +166,7 @@ void ffStart(void) {
+@@ -147,7 +167,7 @@ void ffStart(void) {
      }
  
      if (ffDisableLinewrap) {

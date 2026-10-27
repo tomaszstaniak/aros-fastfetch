@@ -205,6 +205,13 @@ def package(target, version):
     exe = b / "cmake" / "fastfetch"
     if hashlib.sha256(exe.read_bytes()).hexdigest() != record["fastfetch_sha256"]:
         raise RuntimeError(f"{exe} differs from its build record")
+    # The archive carries the series as its source: it must be the series
+    # this executable was built from.
+    if record.get("source") != "reconstructed series":
+        raise RuntimeError(f"{b} was built from a work copy; package only a build of the series")
+    current = {n: hashlib.sha256((ROOT / "patches" / REPO / n).read_bytes()).hexdigest() for n in series()}
+    if record["series"] != series() or record["patches_sha256"] != current or record["upstream"] != manifest():
+        raise RuntimeError(f"the series changed since {b} was built; rebuild it")
     run([sys.executable, ROOT / "scripts" / "package.py", target, version, b])
 
 

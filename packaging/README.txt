@@ -30,7 +30,8 @@ Use
 A terminal that reports its capabilities (Limpet 0.8.0 or later) gets
 colours, its name and version, and UTF-8 text. The standard Shell window
 (CON:) gets plain text in ISO-8859-1. Output redirected to a file, and
-JSON, contain no escape sequences.
+JSON, contain no escape sequences (--dynamic-interval redraws the screen
+and is meant for a console).
 
 Configuration
 -------------
