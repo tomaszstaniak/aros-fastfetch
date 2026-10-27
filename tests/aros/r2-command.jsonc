@@ -1,0 +1,11 @@
+// Read with -c by r2.script: the Command module with an explicit program in
+// a drawer with spaces, and two command lines; all three are started before
+// the first is read (the module's parallel default).
+{
+    "logo": { "type": "none" },
+    "modules": [
+        { "type": "command", "key": "Spaces", "shell": "RAM:ff r2/My Tools/say it", "param": "", "text": "from a drawer with spaces" },
+        { "type": "command", "key": "Second", "text": "Echo second" },
+        { "type": "command", "key": "Third", "text": "Echo third" }
+    ]
+}

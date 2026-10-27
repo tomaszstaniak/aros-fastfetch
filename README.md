@@ -3,7 +3,8 @@
 [Fastfetch](https://github.com/fastfetch-cli/fastfetch) 2.70.0 for AROS: it
 shows the AROS logo next to information about the running system (AROS
 version and ABI, kernel, uptime, screen mode, Wanderer and Intuition, fonts,
-terminal, processor, memory, volumes, local IP address, locale). The data
+terminal, processor, memory, volumes, local IP address, locale). In Limpet it
+can show the AROS logo as a picture. The data
 comes from AROS itself (exec, dos, graphics, intuition, locale,
 processor.resource, bsdsocket.library); nothing is taken from Linux files.
 
@@ -25,23 +26,36 @@ Unpack the archive, add its drawer to the Shell's path
 Fastfetch on other systems: `fastfetch --help`, `--format json`,
 `-c <preset>`, `--logo none`, `--dynamic-interval <ms>` (ends with Ctrl-C).
 
+Without options it shows the compact view of `share/fastfetch/config.jsonc`
+in the package: the small logo, above the list when the window is too narrow
+for it beside (in terminals that report their width), and lines cut at the
+window's edge instead of wrapped. `fastfetch -c aros-logo` shows the AROS
+logo as a picture with the details in groups and bars, in terminals that
+confirm Kitty graphics (Limpet 0.8.0 and later), and the small text logo
+elsewhere; `--logo FILE` takes any picture a datatype of the system reads.
+
 `fastfetch --gen-config` writes `ENVARC:fastfetch/config.jsonc`. Fastfetch
-reads `ENVARC:fastfetch/`, then `ENV:fastfetch/`, then its own drawer.
-Presets are in `share/fastfetch/presets` in the drawer.
+reads `ENVARC:fastfetch/`, then `ENV:fastfetch/`, then `share/fastfetch/` in
+its own drawer. Presets are in `share/fastfetch/presets` in the drawer.
 
 Colours, the terminal's name and UTF-8 text depend on what the console
 reports through the Limpet capabilities contract on the actual output
 (Limpet 0.8.0 and later report all of them). The standard Shell window
-(CON:) gets plain ISO-8859-1 text. Redirected output and JSON contain no
+(CON:) gets plain text in the character set chosen in Locale preferences
+(codesets.library's system set); names the system keeps are read in that set. Redirected output and JSON contain no
 escape sequences; there, and in CON:, `--dynamic-interval` prints each
 round after the last instead of redrawing the screen.
 
 Modules without a reliable source on AROS (GPU, sound, battery, swap,
 themes, packages, DNS, users) report that they are not supported; the
-default output leaves them out. Local IP needs a running TCP/IP stack.
+default output leaves them out. Local IP needs a running TCP/IP stack; the
+default route is read from AROSTCP's routing table. Physical cores and
+processor packages are not reported by AROS and are left unknown.
 
 ## Building
 
 See [development](docs/development.md) and the [patch workflow](docs/patching.md).
 Fastfetch and the included yyjson and Limpet SDK are MIT-licensed; the
-packages carry their licences and the patch series.
+packages carry their licences and the patch series. The AROS logo picture
+(`packaging/logos/aros.png`) is the AROS tree's `images/AROS_600x300.png`
+under the AROS Public License 1.1 ([its record](packaging/logos/README.md)).
