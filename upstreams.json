@@ -1,0 +1,9 @@
+{
+  "repositories": {
+    "fastfetch": {
+      "url": "https://github.com/fastfetch-cli/fastfetch.git",
+      "commit": "17bb3fd2384bd814b421d73b8c8b8d08e06cfa26",
+      "tag": "2.70.0"
+    }
+  }
+}
