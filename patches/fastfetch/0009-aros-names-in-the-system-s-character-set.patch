@@ -1,0 +1,622 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:11 +0100
+Subject: [PATCH] AROS: names in the system's character set
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the AROS backend took every name the system keeps (volumes,
+devices, drawers, fonts, screen modes, tasks, locale names) as ISO-8859-1
+and wrote CON: in ISO-8859-1. AROS stores such names in the 8-bit set the
+user chose in Locale prefs: with ISO-8859-2 the byte of a Polish "ą" came
+out as "±", in JSON and on screen. The program drawer's name, converted for
+display, was also used to open presets beside the program, so a drawer
+with a non-ASCII name was not found.
+Solution: the set comes from codesets.library (the system default it
+reports, which follows ENV:CHARSET), read once as a table of the bytes
+0x80..0xFF; ISO-8859-1 when the library is missing. Names convert through
+that table to UTF-8 (U+FFFD for a byte without a character; a UTF-8
+system passes valid UTF-8). CON: and other consoles that do not answer
+the Limpet query get text back in the same set; a terminal that says it
+does not decode UTF-8 gets Latin-1, as its protocol defines. Characters
+the set lacks become the nearest ASCII (dashes, quotes, bar and box
+characters), else "?". Presets beside the program are opened through
+PROGDIR:, not through the converted name.
+Scope: common/aros/aros_charset.c and .h (new), aros_text.h, aros_output.c,
+aros_terminal.c and .h, the AROS detection files that convert names,
+fastfetch.c (preset lookup, AROS only), CMakeLists.txt (the new file).
+Upstream-Status: AROS only; part of the AROS backend.
+Verification: host tests in tests/test_port.py (Latin-2 and Latin-1 names,
+an ISO-8859-2 console, UTF-8 systems, ill-formed bytes); cross-built for
+the three targets. Guest runs: docs/evidence/2026-10-27-r2/.
+Removal: with the AROS backend.
+---
+ CMakeLists.txt                                |  1 +
+ src/common/aros/aros_charset.c                | 55 ++++++++++++
+ src/common/aros/aros_charset.h                | 34 ++++++++
+ src/common/aros/aros_output.c                 | 41 ++++++---
+ src/common/aros/aros_terminal.c               | 10 ++-
+ src/common/aros/aros_terminal.h               | 14 ++--
+ src/common/aros/aros_text.h                   | 84 +++++++++++++++----
+ src/common/impl/FFPlatform_aros.c             |  8 +-
+ src/detection/cpu/cpu_aros.c                  |  2 +-
+ src/detection/disk/disk_aros.c                |  6 +-
+ .../displayserver/displayserver_aros.c        |  2 +-
+ src/detection/font/font_aros.c                |  2 +-
+ src/detection/locale/locale_aros.c            |  2 +-
+ .../terminalshell/terminalshell_aros.c        |  4 +-
+ src/fastfetch.c                               | 29 +++----
+ 15 files changed, 224 insertions(+), 70 deletions(-)
+ create mode 100644 src/common/aros/aros_charset.c
+ create mode 100644 src/common/aros/aros_charset.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a0cd109..950f672 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1403,6 +1403,7 @@ elseif(AROS)
+         src/common/aros/aros_output.c
+         src/common/aros/aros_version.c
+         src/common/aros/aros_sleep.c
++        src/common/aros/aros_charset.c
+         src/common/aros/genconfig_aros.c
+         src/detection/battery/battery_nosupport.c
+         src/detection/bios/bios_nosupport.c
+diff --git a/src/common/aros/aros_charset.c b/src/common/aros/aros_charset.c
+new file mode 100644
+index 0000000..552df29
+--- /dev/null
++++ b/src/common/aros/aros_charset.c
+@@ -0,0 +1,55 @@
++#include "aros_charset.h"
++
++#include <proto/exec.h>
++#include <proto/codesets.h>
++#include <libraries/codesets.h>
++#include <string.h>
++#include <strings.h>
++
++static FFArosCharset charset, latin1;
++
++static void fillLatin1(FFArosCharset* set, const char* name) {
++    set->name = name;
++    set->utf8 = false;
++    for (unsigned i = 0; i < 128; ++i) {
++        set->high[i] = i < 0x20 ? 0 : 0x80 + i; // C1 controls are no characters of a name
++    }
++}
++
++const FFArosCharset* ffArosCharsetLatin1(void) {
++    if (!latin1.name) {
++        fillLatin1(&latin1, "ISO-8859-1");
++    }
++    return &latin1;
++}
++
++const FFArosCharset* ffArosCharset(void) {
++    if (charset.name) {
++        return &charset;
++    }
++    fillLatin1(&charset, "ISO-8859-1 (codesets.library not available)");
++    struct Library* CodesetsBase = OpenLibrary((CONST_STRPTR) CODESETSNAME, 6);
++    if (!CodesetsBase) {
++        return &charset;
++    }
++    // NULL: the system's set (ENV:CHARSET, else the locale's country).
++    struct TagItem tags[] = { { CSA_FallbackToDefault, TRUE }, { TAG_DONE, 0 } };
++    struct codeset* set = CodesetsFindA(nullptr, tags);
++    static char name[64];
++    if (set && set->name) {
++        strncpy(name, set->name, sizeof(name) - 1);
++        if (strcasecmp(name, "UTF-8") == 0) {
++            charset.name = name;
++            charset.utf8 = true;
++        } else if (strncasecmp(name, "UTF-", 4) != 0) {
++            charset.name = name;
++            for (unsigned i = 0; i < 128; ++i) {
++                uint32_t scalar = set->table[0x80 + i].ucs4;
++                // C1 controls are no characters of a name.
++                charset.high[i] = scalar >= 0xA0 && scalar <= 0x10FFFF && !(scalar >= 0xD800 && scalar <= 0xDFFF) ? scalar : 0;
++            }
++        }
++    }
++    CloseLibrary(CodesetsBase);
++    return &charset;
++}
+diff --git a/src/common/aros/aros_charset.h b/src/common/aros/aros_charset.h
+new file mode 100644
+index 0000000..1b8d433
+--- /dev/null
++++ b/src/common/aros/aros_charset.h
+@@ -0,0 +1,34 @@
++#pragma once
++
++#include <stdbool.h>
++#include <stdint.h>
++
++// The character set of the names the system keeps: volumes, devices,
++// drawers, fonts, screen modes, tasks. AROS stores their bytes as typed,
++// in the 8-bit set the user chose in Locale prefs (ENV:CHARSET), and
++// codesets.library is the system's own answer to which set that is.
++typedef struct FFArosCharset {
++    const char* name; // e.g. "ISO-8859-2"
++    bool utf8;        // names are already UTF-8
++    // Unicode scalar of each byte 0x80..0xFF; 0 where the set has none.
++    uint32_t high[128];
++} FFArosCharset;
++
++// Asked once. Without codesets.library (or a set it cannot describe) it is
++// ISO-8859-1, the Amiga default, and the name says so.
++const FFArosCharset* ffArosCharset(void);
++// ISO-8859-1 itself, for a terminal that says it shows bytes as Latin-1.
++const FFArosCharset* ffArosCharsetLatin1(void);
++
++// The byte that shows `scalar` in the set, or 0 when the set has none.
++static inline unsigned char ffArosCharsetByte(const FFArosCharset* set, uint32_t scalar) {
++    if (scalar < 0x80) {
++        return (unsigned char) scalar;
++    }
++    for (unsigned i = 0; i < 128; ++i) {
++        if (set->high[i] == scalar) {
++            return (unsigned char) (0x80 + i);
++        }
++    }
++    return 0;
++}
+diff --git a/src/common/aros/aros_output.c b/src/common/aros/aros_output.c
+index b263baf..ebf8662 100644
+--- a/src/common/aros/aros_output.c
++++ b/src/common/aros/aros_output.c
+@@ -14,6 +14,7 @@
+ 
+ #include "aros_output.h"
+ #include "aros_terminal.h"
++#include "aros_charset.h"
+ 
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -22,7 +23,7 @@
+ 
+ // A sequence split across two writes is kept here until it ends. Longer
+ // ones are not SGR colour sequences and are passed on as they are. So is a
+-// UTF-8 character split across two writes, for a Latin-1 console.
++// UTF-8 character split across two writes, for an 8-bit console.
+ static struct {
+     enum { IN_TEXT, IN_ESCAPE, IN_CSI } state;
+     char sequence[64];
+@@ -32,7 +33,7 @@ static struct {
+ } filter;
+ 
+ static bool active(FILE* stream) {
+-    return stream == stdout && (ffArosTerminalPens() || ffArosTerminalLatin1());
++    return stream == stdout && (ffArosTerminalPens() || ffArosTerminalCharset());
+ }
+ 
+ static void emit(const char* bytes, size_t length) {
+@@ -96,14 +97,15 @@ static void emitSgr(const char* sequence, size_t length) {
+     emit(out, o);
+ }
+ 
+-// A character outside Latin-1 as the nearest ASCII, else '?'.
++// A character as its byte in the system's character set (aros_charset.h),
++// else the nearest ASCII, else '?'.
+ static void emitScalar(uint32_t scalar) {
+     char c = '?';
+     const char* s = nullptr;
+-    if (scalar >= 0x80 && scalar < 0xA0) {
+-        c = '?'; // C1 controls: 0x9B is CSI on an Amiga console
+-    } else if (scalar < 0x100) {
+-        c = (char) scalar;
++    const FFArosCharset* set = ffArosTerminalCharset();
++    unsigned char native = scalar >= 0x80 && scalar < 0xA0 ? 0 : ffArosCharsetByte(set, scalar);
++    if (native) { // C1 controls never: 0x9B is CSI on an Amiga console
++        c = (char) native;
+     } else if (scalar == 0x2010 || scalar == 0x2011 || scalar == 0x2013 || scalar == 0x2014 || scalar == 0x2212) {
+         c = '-';
+     } else if (scalar == 0x2018 || scalar == 0x2019) {
+@@ -111,11 +113,24 @@ static void emitScalar(uint32_t scalar) {
+     } else if (scalar == 0x201C || scalar == 0x201D) {
+         c = '"';
+     } else if (scalar == 0x2022) {
+-        c = (char) 0xB7; // middle dot
++        unsigned char dot = ffArosCharsetByte(set, 0x00B7);
++        c = dot ? (char) dot : '*';
++    } else if (scalar == 0x00B7 || scalar == 0x2027) {
++        c = '.';
++    } else if (scalar == 0x2500 || scalar == 0x2501 || scalar == 0x2504 || scalar == 0x2508 || scalar == 0x2550) {
++        c = '-'; // box drawing
++    } else if (scalar == 0x2502 || scalar == 0x2503 || scalar == 0x2506 || scalar == 0x250A || scalar == 0x2551) {
++        c = '|';
++    } else if (scalar >= 0x250C && scalar <= 0x256C) {
++        c = '+';
+     } else if (scalar == 0x2026) {
+         s = "...";
+     } else if (scalar == 0x2713 || scalar == 0x2714) {
+         c = '*'; // check mark
++    } else if (scalar == 0x25A0 || scalar == 0x2588 || scalar == 0x2593) {
++        c = '#'; // filled bar cells
++    } else if (scalar == 0x2591 || scalar == 0x2592) {
++        c = '-'; // empty bar cells
+     }
+     if (s) {
+         emit(s, strlen(s));
+@@ -124,8 +139,8 @@ static void emitScalar(uint32_t scalar) {
+     }
+ }
+ 
+-// One byte of text at or above 0x80, for a Latin-1 console.
+-static void latin1Byte(unsigned char b) {
++// One byte of text at or above 0x80, for an 8-bit console.
++static void nativeByte(unsigned char b) {
+     if (filter.pending && (b & 0xC0) == 0x80) {
+         filter.scalar = (filter.scalar << 6) | (b & 0x3F);
+         if (--filter.pending == 0) {
+@@ -160,16 +175,16 @@ static void latin1Byte(unsigned char b) {
+ 
+ static void filterBytes(const char* bytes, size_t length) {
+     size_t start = 0;
+-    bool latin1 = ffArosTerminalLatin1();
++    const FFArosCharset* native = ffArosTerminalCharset();
+     bool pens = ffArosTerminalPens();
+     for (size_t i = 0; i < length; ++i) {
+         char c = bytes[i];
+         switch (filter.state) {
+             case IN_TEXT:
+-                if (latin1 && ((unsigned char) c & 0x80)) {
++                if (native && ((unsigned char) c & 0x80)) {
+                     emit(bytes + start, i - start);
+                     start = i + 1;
+-                    latin1Byte((unsigned char) c);
++                    nativeByte((unsigned char) c);
+                     break;
+                 }
+                 if (filter.pending) { // ASCII cuts a sequence short; the range before it is empty
+diff --git a/src/common/aros/aros_terminal.c b/src/common/aros/aros_terminal.c
+index 6cf1fdd..3b74d9b 100644
+--- a/src/common/aros/aros_terminal.c
++++ b/src/common/aros/aros_terminal.c
+@@ -2,6 +2,7 @@
+ // recurse into the output filter.
+ #undef fflush
+ #include "aros_terminal.h"
++#include "aros_charset.h"
+ 
+ #include <proto/exec.h>
+ #include <proto/dos.h>
+@@ -67,12 +68,15 @@ bool ffArosTerminalUnanswered(void) {
+     return !state.answered && state.handler[0] != 0;
+ }
+ 
+-bool ffArosTerminalLatin1(void) {
++const FFArosCharset* ffArosTerminalCharset(void) {
+     ask();
+     if (!state.answered) {
+-        return state.handler[0] != 0;
++        return state.handler[0] != 0 && !ffArosCharset()->utf8 ? ffArosCharset() : nullptr;
+     }
+-    return (state.presentation.known & XTY_PRESENT_KNOWN_TEXT) && !limpet_text_utf8(&state.presentation);
++    // XTY_TEXT_UTF8 clear with the text bits known: bytes are shown as Latin-1.
++    return (state.presentation.known & XTY_PRESENT_KNOWN_TEXT) && !limpet_text_utf8(&state.presentation)
++        ? ffArosCharsetLatin1()
++        : nullptr;
+ }
+ 
+ bool ffArosTerminalPens(void) {
+diff --git a/src/common/aros/aros_terminal.h b/src/common/aros/aros_terminal.h
+index c468293..4c3f0c1 100644
+--- a/src/common/aros/aros_terminal.h
++++ b/src/common/aros/aros_terminal.h
+@@ -21,12 +21,14 @@ bool ffArosTerminalPlain(void);
+ bool ffArosTerminalUnanswered(void);
+ // The console confirmed UTF-8 decoding.
+ bool ffArosTerminalUtf8(void);
+-// Text for this console must be ISO-8859-1: an interactive console that did
+-// not answer the query (CON: and other Amiga consoles draw each byte from a
+-// Latin-1 font), or one that said it does not decode UTF-8. A terminal that
+-// answered without the text bits (Limpet before 0.8.0) is not known to lack
+-// UTF-8 and is written UTF-8, as is anything that is not a console.
+-bool ffArosTerminalLatin1(void);
++// The 8-bit set text for this console must be written in, or nullptr for
++// UTF-8. An interactive console that did not answer the query (CON: and
++// other Amiga consoles draw each byte from the screen font) gets the
++// system's set (aros_charset.h), unless that is UTF-8; one that said it
++// does not decode UTF-8 gets Latin-1, as the protocol defines. A terminal
++// that answered without the text bits (Limpet before 0.8.0) is not known
++// to lack UTF-8 and is written UTF-8, as is anything that is not a console.
++const struct FFArosCharset* ffArosTerminalCharset(void);
+ // SGR 30..37/40..47 select Amiga screen pens there (XTY_COLOR_PENS).
+ bool ffArosTerminalPens(void);
+ // The terminal's name and version (operation 14), or nullptr.
+diff --git a/src/common/aros/aros_text.h b/src/common/aros/aros_text.h
+index 1fc027b..bd5d23c 100644
+--- a/src/common/aros/aros_text.h
++++ b/src/common/aros/aros_text.h
+@@ -1,32 +1,84 @@
+ #pragma once
+ 
+ #include "common/FFstrbuf.h"
++#include "common/aros/aros_charset.h"
+ #include <stddef.h>
+ #include <string.h>
+ 
+-// AROS names (volumes, fonts, locales, tasks, screen modes) are ISO-8859-1,
+-// and fastfetch keeps UTF-8: its output filter and the JSON writer read
+-// every string as UTF-8, so a raw "Größe:" would come out as "Gr??e" in
+-// CON: and make the JSON invalid. Each byte from 0x80 becomes two.
+-static inline void ffArosStrbufSetLatin1N(FFstrbuf* out, const char* text, size_t length) {
+-    ffStrbufClear(out);
+-    for (size_t i = 0; i < length; ++i) {
+-        unsigned char c = (unsigned char) text[i];
++// AROS names (volumes, fonts, locales, tasks, screen modes, drawers) are
++// bytes in the system's character set (aros_charset.h), and fastfetch
++// keeps UTF-8: its output filter and the JSON writer read every string as
++// UTF-8, so a raw "Größe:" would come out as "Gr??e" in CON: and make the
++// JSON invalid. These convert for display and JSON only; a name that goes
++// back to DOS is kept as the bytes DOS gave.
++static inline void ffArosStrbufAppendScalar(FFstrbuf* out, uint32_t c) {
++    if (c < 0x80) {
++        ffStrbufAppendC(out, (char) c);
++    } else if (c < 0x800) {
++        ffStrbufAppendC(out, (char) (0xC0 | (c >> 6)));
++        ffStrbufAppendC(out, (char) (0x80 | (c & 0x3F)));
++    } else if (c < 0x10000) {
++        ffStrbufAppendC(out, (char) (0xE0 | (c >> 12)));
++        ffStrbufAppendC(out, (char) (0x80 | ((c >> 6) & 0x3F)));
++        ffStrbufAppendC(out, (char) (0x80 | (c & 0x3F)));
++    } else {
++        ffStrbufAppendC(out, (char) (0xF0 | (c >> 18)));
++        ffStrbufAppendC(out, (char) (0x80 | ((c >> 12) & 0x3F)));
++        ffStrbufAppendC(out, (char) (0x80 | ((c >> 6) & 0x3F)));
++        ffStrbufAppendC(out, (char) (0x80 | (c & 0x3F)));
++    }
++}
++
++// Length of a well-formed UTF-8 sequence at text (at most `left` bytes), or 0.
++static inline size_t ffArosUtf8Length(const unsigned char* text, size_t left) {
++    unsigned char c = text[0];
++    size_t n = c >= 0xF0 && c <= 0xF4 ? 4 : c >= 0xE0 ? 3 : c >= 0xC2 && c < 0xE0 ? 2 : 0;
++    if (!n || n > left || c > 0xF4) {
++        return 0;
++    }
++    uint32_t scalar = c & (0x7F >> n);
++    for (size_t i = 1; i < n; ++i) {
++        if ((text[i] & 0xC0) != 0x80) {
++            return 0;
++        }
++        scalar = (scalar << 6) | (text[i] & 0x3F);
++    }
++    if ((n == 3 && (scalar < 0x800 || (scalar >= 0xD800 && scalar <= 0xDFFF))) || (n == 4 && (scalar < 0x10000 || scalar > 0x10FFFF))) {
++        return 0;
++    }
++    return n;
++}
++
++static inline void ffArosStrbufAppendNativeN(FFstrbuf* out, const char* text, size_t length) {
++    const FFArosCharset* set = ffArosCharset();
++    const unsigned char* bytes = (const unsigned char*) text;
++    for (size_t i = 0; i < length;) {
++        unsigned char c = bytes[i];
+         if (c < 0x80) {
+             ffStrbufAppendC(out, (char) c);
++            ++i;
++        } else if (set->utf8) {
++            size_t n = ffArosUtf8Length(bytes + i, length - i);
++            if (n) {
++                ffStrbufAppendNS(out, (uint32_t) n, text + i);
++                i += n;
++            } else {
++                ffArosStrbufAppendScalar(out, 0xFFFD);
++                ++i;
++            }
+         } else {
+-            ffStrbufAppendC(out, (char) (0xC0 | (c >> 6)));
+-            ffStrbufAppendC(out, (char) (0x80 | (c & 0x3F)));
++            uint32_t scalar = set->high[c - 0x80];
++            ffArosStrbufAppendScalar(out, scalar ? scalar : 0xFFFD);
++            ++i;
+         }
+     }
+ }
+ 
+-static inline void ffArosStrbufSetLatin1(FFstrbuf* out, const char* text) {
+-    ffArosStrbufSetLatin1N(out, text, strlen(text));
++static inline void ffArosStrbufSetNativeN(FFstrbuf* out, const char* text, size_t length) {
++    ffStrbufClear(out);
++    ffArosStrbufAppendNativeN(out, text, length);
+ }
+ 
+-static inline void ffArosStrbufAppendLatin1N(FFstrbuf* out, const char* text, size_t length) {
+-    FF_STRBUF_AUTO_DESTROY part = ffStrbufCreate();
+-    ffArosStrbufSetLatin1N(&part, text, length);
+-    ffStrbufAppend(out, &part);
++static inline void ffArosStrbufSetNative(FFstrbuf* out, const char* text) {
++    ffArosStrbufSetNativeN(out, text, strlen(text));
+ }
+diff --git a/src/common/impl/FFPlatform_aros.c b/src/common/impl/FFPlatform_aros.c
+index bdd85e0..4888174 100644
+--- a/src/common/impl/FFPlatform_aros.c
++++ b/src/common/impl/FFPlatform_aros.c
+@@ -41,7 +41,7 @@ static void nameOfLock(BPTR lock, FFstrbuf* out) {
+     char name[1024];
+     if (lock && NameFromLock(lock, (STRPTR) name, sizeof(name))) {
+         // For display and JSON only: files are found through PROGDIR:.
+-        ffArosStrbufSetLatin1(out, name);
++        ffArosStrbufSetNative(out, name);
+         ensureDir(out);
+     }
+ }
+@@ -75,7 +75,7 @@ void ffPlatformInitImpl(FFPlatform* platform) {
+         char program[256];
+         if (GetProgramName((STRPTR) program, sizeof(program))) {
+             const char* file = (const char*) FilePart((STRPTR) program);
+-            ffArosStrbufAppendLatin1N(&platform->exePath, file, strlen(file));
++            ffArosStrbufAppendNativeN(&platform->exePath, file, strlen(file));
+         }
+     }
+     // Presets and logos: PROGDIR:share/fastfetch/..., as on other systems.
+@@ -90,12 +90,12 @@ void ffPlatformInitImpl(FFPlatform* platform) {
+     // A single-user system: a name only when the user has set one.
+     const char* user = getenv("USER");
+     if (user && *user) {
+-        ffArosStrbufSetLatin1(&platform->userName, user);
++        ffArosStrbufSetNative(&platform->userName, user);
+     }
+ 
+     struct utsname u;
+     if (uname(&u) == 0) {
+-        ffArosStrbufSetLatin1(&platform->hostName, u.nodename);
++        ffArosStrbufSetNative(&platform->hostName, u.nodename);
+         ffStrbufSetS(&platform->sysinfo.version, u.version);
+     }
+     ffStrbufSetStatic(&platform->userShell, "Shell");
+diff --git a/src/detection/cpu/cpu_aros.c b/src/detection/cpu/cpu_aros.c
+index 6e337a8..4afeeb5 100644
+--- a/src/detection/cpu/cpu_aros.c
++++ b/src/detection/cpu/cpu_aros.c
+@@ -22,7 +22,7 @@ const char* ffDetectCPUImpl([[maybe_unused]] const FFCPUOptions* options, FFCPUR
+     if (!model || !*model || ffStrEqualsIgnCase((const char*) model, "Unknown")) {
+         return "processor.resource does not name this processor";
+     }
+-    ffArosStrbufSetLatin1(&cpu->name, (const char*) model);
++    ffArosStrbufSetNative(&cpu->name, (const char*) model);
+     // Processors the system found; whether exec schedules on all of them
+     // (an SMP build) is not reported here.
+     cpu->coresPhysical = cpu->coresLogical = cpu->coresOnline = (uint16_t) count;
+diff --git a/src/detection/disk/disk_aros.c b/src/detection/disk/disk_aros.c
+index 5075cb4..c7b93e6 100644
+--- a/src/detection/disk/disk_aros.c
++++ b/src/detection/disk/disk_aros.c
+@@ -134,12 +134,12 @@ const char* ffDetectDisksImpl(FFDiskOptions* options, FFlist* disks) {
+         disk->filesTotal = 0;
+         disk->createTime = 0;
+         ffStrbufInit(&disk->mountFrom);
+-        ffArosStrbufSetLatin1(&disk->mountFrom, names[i].device);
++        ffArosStrbufSetNative(&disk->mountFrom, names[i].device);
+         ffStrbufInit(&disk->mountpoint);
+-        ffArosStrbufSetLatin1(&disk->mountpoint, path);
++        ffArosStrbufSetNative(&disk->mountpoint, path);
+         ffStrbufInitMove(&disk->filesystem, &fs);
+         ffStrbufInit(&disk->name);
+-        ffArosStrbufSetLatin1N(&disk->name, path, strlen(path) - 1);
++        ffArosStrbufSetNativeN(&disk->name, path, strlen(path) - 1);
+         disk->type = FF_DISK_VOLUME_TYPE_REGULAR_BIT;
+         // The RAM disk grows with its contents: its "size" is free memory.
+         if (ffStrEquals(names[i].device, "RAM:")) {
+diff --git a/src/detection/displayserver/displayserver_aros.c b/src/detection/displayserver/displayserver_aros.c
+index c268bf4..00a15e5 100644
+--- a/src/detection/displayserver/displayserver_aros.c
++++ b/src/detection/displayserver/displayserver_aros.c
+@@ -57,7 +57,7 @@ void ffConnectDisplayServerImpl(FFDisplayServerResult* ds) {
+     FF_STRBUF_AUTO_DESTROY name = ffStrbufCreate();
+     struct NameInfo info;
+     if (mode != (ULONG) INVALID_ID && GetDisplayInfoData(nullptr, (UBYTE*) &info, sizeof(info), DTAG_NAME, mode)) {
+-        ffArosStrbufSetLatin1(&name, (const char*) info.Name);
++        ffArosStrbufSetNative(&name, (const char*) info.Name);
+     }
+     FFDisplayResult* display = ffdsAppendDisplay(ds, (uint32_t) screen->Width, (uint32_t) screen->Height, 0, 0, 0, 0, 0, 0,
+                                                  &name, FF_DISPLAY_TYPE_UNKNOWN, true, mode, 0, 0, "graphics.library");
+diff --git a/src/detection/font/font_aros.c b/src/detection/font/font_aros.c
+index 035e271..400bd6e 100644
+--- a/src/detection/font/font_aros.c
++++ b/src/detection/font/font_aros.c
+@@ -16,7 +16,7 @@ static void setFont(FFstrbuf* out, const char* name, unsigned size) {
+     if (n > 5 && strcmp(name + n - 5, ".font") == 0) {
+         n -= 5;
+     }
+-    ffArosStrbufSetLatin1N(out, name, n);
++    ffArosStrbufSetNativeN(out, name, n);
+     ffStrbufAppendF(out, " %u", size);
+ }
+ 
+diff --git a/src/detection/locale/locale_aros.c b/src/detection/locale/locale_aros.c
+index 4b73e08..ec41f60 100644
+--- a/src/detection/locale/locale_aros.c
++++ b/src/detection/locale/locale_aros.c
+@@ -11,7 +11,7 @@ static void appendName(FFstrbuf* out, const char* name, const char* suffix) {
+     if (n > s && strcmp(name + n - s, suffix) == 0) {
+         n -= s;
+     }
+-    ffArosStrbufAppendLatin1N(out, name, n);
++    ffArosStrbufAppendNativeN(out, name, n);
+ }
+ 
+ const char* ffDetectLocale(FFstrbuf* result) {
+diff --git a/src/detection/terminalshell/terminalshell_aros.c b/src/detection/terminalshell/terminalshell_aros.c
+index f55d99b..bc183f6 100644
+--- a/src/detection/terminalshell/terminalshell_aros.c
++++ b/src/detection/terminalshell/terminalshell_aros.c
+@@ -101,9 +101,9 @@ const FFTerminalResult* ffDetectTerminal() {
+             base = p + 1;
+         }
+     }
+-    ffArosStrbufSetLatin1(&result->processName, *base ? base : task);
++    ffArosStrbufSetNative(&result->processName, *base ? base : task);
+     if (ffStrContainsC(task, ':')) {
+-        ffArosStrbufSetLatin1(&result->exePath, task);
++        ffArosStrbufSetNative(&result->exePath, task);
+         ffStrbufSet(&result->exe, &result->exePath);
+     }
+     // The file part of exe, which is UTF-8 now, not of the raw task name.
+diff --git a/src/fastfetch.c b/src/fastfetch.c
+index 071f2b7..a15ae10 100644
+--- a/src/fastfetch.c
++++ b/src/fastfetch.c
+@@ -1,16 +1,5 @@
+ #include "fastfetch.h"
+ 
+-#ifdef __AROS__
+-// The length of the drawer part of an AmigaDOS path, separator included:
+-// "Work:Fastfetch/fastfetch" -> "Work:Fastfetch/", "Work:fastfetch" -> "Work:".
+-static uint32_t ffArosDrawerLength(const FFstrbuf* path) {
+-    uint32_t i = path->length;
+-    while (i > 0 && path->chars[i - 1] != '/' && path->chars[i - 1] != ':') {
+-        --i;
+-    }
+-    return i;
+-}
+-#endif
+ #include "common/ffdata.h"
+ #include "detection/version/version.h"
+ #include "logo/logo.h"
+@@ -348,13 +337,12 @@ static void listAvailablePresets(bool pretty) {
+     }
+ 
+     if (instance.state.platform.exePath.length) {
+-        FF_STRBUF_AUTO_DESTROY absolutePath = ffStrbufCreateCopy(&instance.state.platform.exePath);
+ #ifdef __AROS__
+-        // "Vol:prog" is in the volume's root: its drawer is "Vol:", and
+-        // "Vol:/presets/" would be the root's parent.
+-        ffStrbufSubstrBefore(&absolutePath, ffArosDrawerLength(&absolutePath));
+-        ffStrbufAppendS(&absolutePath, "presets/");
++        // The program's drawer as DOS names it: exePath is converted for
++        // display and would not find a drawer with a non-ASCII name.
++        FF_STRBUF_AUTO_DESTROY absolutePath = ffStrbufCreateStatic("PROGDIR:presets/");
+ #else
++        FF_STRBUF_AUTO_DESTROY absolutePath = ffStrbufCreateCopy(&instance.state.platform.exePath);
+         ffStrbufSubstrBeforeLastC(&absolutePath, '/');
+         ffStrbufAppendS(&absolutePath, "/presets/");
+ #endif
+@@ -573,14 +561,17 @@ static void optionParseConfigFile(FFdata* data, const char* key, const char* val
+ 
+     if (instance.state.platform.exePath.length) {
+ #ifdef __AROS__
+-        uint32_t lastSlash = ffArosDrawerLength(&instance.state.platform.exePath);
++        // PROGDIR: is the program's drawer as DOS names it (see above).
++        const char* drawer = "PROGDIR:";
++        uint32_t lastSlash = (uint32_t) strlen(drawer);
+ #else
++        const char* drawer = instance.state.platform.exePath.chars;
+         uint32_t lastSlash = ffStrbufLastIndexC(&instance.state.platform.exePath, '/') + 1;
+-#endif
+         assert(lastSlash < instance.state.platform.exePath.length);
++#endif
+ 
+         // Try {exePath}/
+-        ffStrbufSetNS(&absolutePath, lastSlash, instance.state.platform.exePath.chars);
++        ffStrbufSetNS(&absolutePath, lastSlash, drawer);
+         ffStrbufAppendS(&absolutePath, value);
+         if (needExtension) {
+             ffStrbufAppendS(&absolutePath, ".jsonc");

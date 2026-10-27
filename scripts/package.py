@@ -82,6 +82,17 @@ def stage(drawer, target, version, build):
     # Presets for -c NAME: fastfetch looks for fastfetch/presets/ in its data
     # directory, which is PROGDIR:share on AROS.
     shutil.copytree(src / "presets", drawer / "share" / "fastfetch" / "presets")
+    packaging = ROOT / "packaging"
+    for p in sorted((packaging / "presets").iterdir()):
+        shutil.copy2(p, drawer / "share" / "fastfetch" / "presets" / p.name)
+    # The compact view: PROGDIR: is the last configuration directory, so a
+    # config of the user's own in ENVARC: or ENV: takes its place.
+    (drawer / "fastfetch").mkdir()
+    shutil.copy2(packaging / "fastfetch" / "config.jsonc", drawer / "fastfetch" / "config.jsonc")
+    # The AROS logo for -c aros-logo, with its licence (packaging/logos/README.md).
+    (drawer / "share" / "fastfetch" / "logos").mkdir()
+    shutil.copy2(packaging / "logos" / "aros.png", drawer / "share" / "fastfetch" / "logos" / "aros.png")
+    shutil.copy2(packaging / "logos" / "APL-1.1.txt", lic / "aros-logo-APL-1.1.txt")
     source = drawer / "Source"
     (source / "patches").mkdir(parents=True)
     shutil.copy2(ROOT / "upstreams.json", source / "upstreams.json")

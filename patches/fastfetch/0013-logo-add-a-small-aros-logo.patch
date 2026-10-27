@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:39 +0100
+Subject: [PATCH] Logo: add a small AROS logo
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the AROS logo (patch 0001) takes 33 columns; next to it the
+longer module lines no longer fit an 80-column Shell window and wrapped
+under the logo. There was no small variant for --logo-type small.
+Solution: aros_small, the word AROS in four lines of 21 columns, drawn
+for this port (no existing artwork used).
+Scope: src/logo/ascii/a/aros_small.txt and its entry in a.inc; no code.
+Upstream-Status: suitable for upstream with 0001.
+Verification: guest runs: docs/evidence/2026-10-27-r2/.
+Removal: when upstream fastfetch ships AROS logos.
+---
+ src/logo/ascii/a.inc            | 13 +++++++++++++
+ src/logo/ascii/a/aros_small.txt |  4 ++++
+ 2 files changed, 17 insertions(+)
+ create mode 100644 src/logo/ascii/a/aros_small.txt
+
+diff --git a/src/logo/ascii/a.inc b/src/logo/ascii/a.inc
+index 3ecad08..79efa91 100644
+--- a/src/logo/ascii/a.inc
++++ b/src/logo/ascii/a.inc
+@@ -654,6 +654,19 @@ static const FFlogo A[] = {
+         .colorTitle = FF_COLOR_FG_BLUE,
+     },
+     #endif
++    #ifdef FASTFETCH_DATATEXT_LOGO_AROS_SMALL
++    // AROSSmall
++    {
++        .names = { "aros_small" },
++        .type = FF_LOGO_LINE_TYPE_SMALL_BIT,
++        .lines = FASTFETCH_DATATEXT_LOGO_AROS_SMALL,
++        .colors = {
++            FF_COLOR_FG_BLUE,
++        },
++        .colorKeys = FF_COLOR_FG_BLUE,
++        .colorTitle = FF_COLOR_FG_BLUE,
++    },
++    #endif
+     #ifdef FASTFETCH_DATATEXT_LOGO_ARTIX
+     // Artix
+     {
+diff --git a/src/logo/ascii/a/aros_small.txt b/src/logo/ascii/a/aros_small.txt
+new file mode 100644
+index 0000000..f720f53
+--- /dev/null
++++ b/src/logo/ascii/a/aros_small.txt
+@@ -0,0 +1,4 @@
++$1   _   ___  ___  ___
++$1  /_\ | _ \/ _ \/ __|
++$1 / _ \|   / (_) \__ \
++$1/_/ \_\_|_\\___/|___/

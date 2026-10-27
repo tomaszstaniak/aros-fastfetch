@@ -1,0 +1,247 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:39 +0100
+Subject: [PATCH] AROS: the default route from AROSTCP's routing table
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the Local IP backend called the first interface that was up and
+not the loopback the default route, without reading any route. With two
+network cards that can be the wrong one, and the module's default
+(default-route-only) then hides the right one.
+Solution: read the default route (0.0.0.0/0, up) where AROS's own
+netstat does: miami.library's FindKernelVar("_rt_tables") gives
+AROSTCP's routing table, walked read-only under Forbid() with every
+pointer checked by TypeOfMem and a bound on nodes and depth. Its
+interface address marks the interface. AROSTCP answers neither RTM_GET on
+a routing socket nor GetRouteInfo() (stubs), and a connected UDP socket
+falls back to the first interface when no route exists, so neither can
+tell a route from none. Without the table (no miami.library, another
+stack) no interface is called the default route, and default-route-only
+reports that it cannot be decided instead of guessing. The structure
+prefixes read are those of net/radix.h and net/route.h of
+workbench/network/common/include, identical in the ABIv11, mainline and
+Pi trees (the ABIv11 SDK lacks the headers).
+Scope: detection/localip/localip_aros.c.
+Upstream-Status: AROS only; part of the AROS backend.
+Verification: cross-built for the three targets. Guest runs:
+docs/evidence/2026-10-27-r2/.
+Removal: with the AROS backend, or when AROSTCP answers RTM_GET.
+---
+ src/detection/localip/localip_aros.c | 175 +++++++++++++++++++++++++--
+ 1 file changed, 164 insertions(+), 11 deletions(-)
+
+diff --git a/src/detection/localip/localip_aros.c b/src/detection/localip/localip_aros.c
+index 44af302..1424698 100644
+--- a/src/detection/localip/localip_aros.c
++++ b/src/detection/localip/localip_aros.c
+@@ -3,6 +3,7 @@
+ 
+ #include <proto/exec.h>
+ #include <proto/bsdsocket.h>
++#include <proto/miami.h>
+ #include <sys/socket.h>
+ #include <sys/sockio.h>
+ #include <net/if.h>
+@@ -46,6 +47,152 @@ static void appendIpv4(FFstrbuf* buffer, const struct sockaddr_in* address, cons
+     }
+ }
+ 
++
++// The default route, read from AROSTCP's own routing table, as its netstat
++// does: miami.library's FindKernelVar("_rt_tables") gives the table, which
++// lives in the same address space. AROSTCP answers neither RTM_GET on a
++// routing socket nor GetRouteInfo() (both are stubs there), and a connected
++// UDP socket picks the first interface when no route exists, so neither
++// tells a default route from none.
++//
++// The layouts below are those of net/radix.h and net/route.h in
++// workbench/network/common/include, which AROSTCP is built from (identical
++// in the ABIv11 2026.09, mainline and Pi trees; the ABIv11 SDK does not ship
++// the headers). Only the leading fields that are read are declared.
++struct ArosRadixNode {
++    void* rn_mklist;
++    struct ArosRadixNode* rn_p;
++    short rn_b;
++    char rn_bmask;
++    unsigned char rn_flags;
++    union {
++        struct {
++            const struct sockaddr* rn_Key;
++            const struct sockaddr* rn_Mask;
++            struct ArosRadixNode* rn_Dupedkey;
++        } leaf;
++        struct {
++            int rn_Off;
++            struct ArosRadixNode* rn_L;
++            struct ArosRadixNode* rn_R;
++        } node;
++    } rn_u;
++};
++struct ArosRadixNodeHead {
++    void* rnh_next;
++    struct ArosRadixNode* rnh_treetop;
++};
++struct ArosIfaddr {
++    const struct sockaddr* ifa_addr;
++};
++struct ArosRtentry {
++    struct ArosRadixNode rt_nodes[2];
++    const struct sockaddr* rt_gateway;
++    short rt_filler;
++    short rt_refcnt;
++    unsigned long rt_flags;
++    void* rt_ifp;
++    const struct ArosIfaddr* rt_ifa;
++};
++#define AROS_RNF_ROOT 2
++#define AROS_RTF_UP 0x1
++
++typedef enum { ROUTE_UNKNOWN, ROUTE_NONE, ROUTE_FOUND } RouteState;
++
++// Every pointer is checked with TypeOfMem before it is read: the table is
++// another task's, read without its lock, under Forbid().
++static bool readable(const void* p, size_t size) {
++    return p && TypeOfMem((APTR) p) && TypeOfMem((APTR) ((const char*) p + size - 1));
++}
++
++static bool isZeroAddress(const struct sockaddr* sa) {
++    if (!readable(sa, sizeof(struct sockaddr_in)) || sa->sa_family != AF_INET) {
++        return false;
++    }
++    return ((const struct sockaddr_in*) sa)->sin_addr.s_addr == 0;
++}
++
++// A mask of zero length or all zero bytes: 0.0.0.0/0.
++static bool isZeroMask(const struct sockaddr* mask) {
++    if (!mask) {
++        return true;
++    }
++    if (!readable(mask, 1)) {
++        return false;
++    }
++    unsigned length = (unsigned char) mask->sa_len;
++    if (length > sizeof(struct sockaddr_in) || !readable(mask, length ? length : 1)) {
++        return false;
++    }
++    const unsigned char* bytes = (const unsigned char*) mask;
++    for (unsigned i = 4; i < length; ++i) { // sa_len, sa_family, port
++        if (bytes[i]) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static RouteState walk(const struct ArosRadixNode* rn, unsigned depth, unsigned* budget, struct in_addr* out) {
++    if (!readable(rn, sizeof(*rn)) || depth > 64 || *budget == 0) {
++        return ROUTE_UNKNOWN;
++    }
++    if (rn->rn_b >= 0) {
++        RouteState left = walk(rn->rn_u.node.rn_L, depth + 1, budget, out);
++        if (left != ROUTE_NONE) {
++            return left;
++        }
++        return walk(rn->rn_u.node.rn_R, depth + 1, budget, out);
++    }
++    for (; rn; rn = rn->rn_u.leaf.rn_Dupedkey) {
++        if (!readable(rn, sizeof(*rn)) || --*budget == 0) {
++            return ROUTE_UNKNOWN;
++        }
++        if (rn->rn_flags & AROS_RNF_ROOT) {
++            continue;
++        }
++        const struct ArosRtentry* rt = (const struct ArosRtentry*) rn; // rt_nodes[0] is first
++        if (!readable(rt, sizeof(*rt))) {
++            return ROUTE_UNKNOWN;
++        }
++        if (!(rt->rt_flags & AROS_RTF_UP) || !isZeroAddress(rn->rn_u.leaf.rn_Key) || !isZeroMask(rn->rn_u.leaf.rn_Mask)) {
++            continue;
++        }
++        if (!readable(rt->rt_ifa, sizeof(*rt->rt_ifa)) || !readable(rt->rt_ifa->ifa_addr, sizeof(struct sockaddr_in)) ||
++            rt->rt_ifa->ifa_addr->sa_family != AF_INET) {
++            return ROUTE_UNKNOWN;
++        }
++        *out = ((const struct sockaddr_in*) rt->rt_ifa->ifa_addr)->sin_addr;
++        return ROUTE_FOUND;
++    }
++    return ROUTE_NONE;
++}
++
++// The local address of the interface the default route uses.
++static RouteState defaultRouteAddress(struct in_addr* out) {
++    struct Library* MiamiBase = OpenLibrary((CONST_STRPTR) "miami.library", 0);
++    if (!MiamiBase) {
++        return ROUTE_UNKNOWN;
++    }
++    RouteState state = ROUTE_UNKNOWN;
++    struct ArosRadixNodeHead* const* tables = FindKernelVar((STRPTR) "_rt_tables");
++    if (tables) {
++        unsigned budget = 4096;
++        Forbid();
++        if (readable(&tables[AF_INET], sizeof(tables[AF_INET]))) {
++            const struct ArosRadixNodeHead* head = tables[AF_INET];
++            if (!head) {
++                state = ROUTE_NONE; // no IPv4 route at all
++            } else if (readable(head, sizeof(*head))) {
++                state = walk(head->rnh_treetop, 0, &budget, out);
++            }
++        }
++        Permit();
++    }
++    CloseLibrary(MiamiBase);
++    return state;
++}
++
+ const char* ffDetectLocalIps(const FFLocalIpOptions* options, FFlist* results) {
+     if (!(options->showType & FF_LOCALIP_TYPE_IPV4_BIT)) {
+         return "Only IPv4 addresses are read on AROS";
+@@ -61,6 +208,14 @@ const char* ffDetectLocalIps(const FFLocalIpOptions* options, FFlist* results) {
+         return "socket() failed";
+     }
+ 
++    struct in_addr routeAddress = {};
++    RouteState route = defaultRouteAddress(&routeAddress);
++    if (route == ROUTE_UNKNOWN && (options->showType & FF_LOCALIP_TYPE_DEFAULT_ROUTE_ONLY_BIT)) {
++        error = "The default route cannot be read (miami.library has no AROSTCP routing table); "
++                "use --localip-default-route-only false";
++        goto exit;
++    }
++
+     char buffer[4096];
+     struct ifconf ifc = { .ifc_len = sizeof(buffer), .ifc_buf = buffer };
+     if (IoctlSocket(s, SIOCGIFCONF, (char*) &ifc) < 0) {
+@@ -92,15 +247,8 @@ const char* ffDetectLocalIps(const FFLocalIpOptions* options, FFlist* results) {
+             continue;
+         }
+ 
+-        // AROSTCP's routing table is not read here. The default route is
+-        // taken to go through the first interface that is up and not the
+-        // loopback, which on a desktop with one network card it does.
+-        bool isDefault = !(flags & IFF_LOOPBACK);
+-        for (uint32_t i = 0; isDefault && i < results->length; ++i) {
+-            if (FF_LIST_GET(FFLocalIpResult, *results, i)->defaultRoute & FF_LOCALIP_TYPE_IPV4_BIT) {
+-                isDefault = false;
+-            }
+-        }
++        bool isDefault = route == ROUTE_FOUND && !(flags & IFF_LOOPBACK) &&
++                         ((const struct sockaddr_in*) &entry->ifr_addr)->sin_addr.s_addr == routeAddress.s_addr;
+         if ((options->showType & FF_LOCALIP_TYPE_DEFAULT_ROUTE_ONLY_BIT) && !isDefault) {
+             continue;
+         }
+@@ -130,8 +278,13 @@ const char* ffDetectLocalIps(const FFLocalIpOptions* options, FFlist* results) {
+             if ((options->showType & FF_LOCALIP_TYPE_MTU_BIT) && IoctlSocket(s, SIOCGIFMTU, (char*) &request) == 0) {
+                 item->mtu = request.ifr_mtu;
+             }
+-        } else if (!(options->showType & FF_LOCALIP_TYPE_ALL_IPS_BIT)) {
+-            continue;
++        } else {
++            if (isDefault) { // the route may use the interface's second address
++                item->defaultRoute |= FF_LOCALIP_TYPE_IPV4_BIT;
++            }
++            if (!(options->showType & FF_LOCALIP_TYPE_ALL_IPS_BIT)) {
++                continue;
++            }
+         }
+ 
+         struct sockaddr_in netmask;

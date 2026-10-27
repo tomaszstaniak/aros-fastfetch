@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:11 +0100
+Subject: [PATCH] AROS: CPU cores only as far as the system reports them
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the CPU backend wrote processor.resource's processor count as
+physical, logical and online cores alike and set the package count to 1.
+Those are different facts: the count is of logical processors the kernel
+found, and a uniprocessor exec runs tasks on one of them only. On a
+two-processor QEMU guest with a uniprocessor exec the JSON said
+"online": 2.
+Solution: the count is the logical processors. Online is that count when
+exec is an SMP build (it alone provides execlock.resource; the system's
+own code tests SMP that way), else 1. Physical cores and packages are not
+reported on AROS and stay 0 (JSON: physical 0, packages null).
+Scope: detection/cpu/cpu_aros.c.
+Upstream-Status: AROS only; part of the AROS backend.
+Verification: cross-built for the three targets. Guest runs:
+docs/evidence/2026-10-27-r2/.
+Removal: with the AROS backend.
+---
+ src/detection/cpu/cpu_aros.c | 15 +++++++++++----
+ 1 file changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/src/detection/cpu/cpu_aros.c b/src/detection/cpu/cpu_aros.c
+index 4afeeb5..ca6e75c 100644
+--- a/src/detection/cpu/cpu_aros.c
++++ b/src/detection/cpu/cpu_aros.c
+@@ -23,10 +23,17 @@ const char* ffDetectCPUImpl([[maybe_unused]] const FFCPUOptions* options, FFCPUR
+         return "processor.resource does not name this processor";
+     }
+     ffArosStrbufSetNative(&cpu->name, (const char*) model);
+-    // Processors the system found; whether exec schedules on all of them
+-    // (an SMP build) is not reported here.
+-    cpu->coresPhysical = cpu->coresLogical = cpu->coresOnline = (uint16_t) count;
+-    cpu->packages = count ? 1 : 0;
++    // processor.resource counts the logical processors the kernel found
++    // (on PC, the APICs). Only an SMP exec runs tasks on more than the boot
++    // processor; it, and nothing else, provides execlock.resource (system
++    // code tests SMP the same way). Cores per package and the package count
++    // are not reported on AROS: they stay 0, unknown.
++    cpu->coresLogical = (uint16_t) count;
++    if (count) {
++        cpu->coresOnline = OpenResource((CONST_STRPTR) "execlock.resource") ? (uint16_t) count : 1;
++    }
++    cpu->coresPhysical = 0;
++    cpu->packages = 0;
+     if (speed) {
+         cpu->frequencyBase = (uint32_t) (speed / 1000000);
+     }

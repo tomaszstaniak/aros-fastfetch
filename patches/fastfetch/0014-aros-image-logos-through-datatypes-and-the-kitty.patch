@@ -1,0 +1,400 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:39 +0100
+Subject: [PATCH] AROS: image logos through datatypes and the Kitty graphics
+ subset
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the AROS build had no image logos: ENABLE_IMAGE_LOGO needs
+ImageMagick or a platform decoder, and upstream's kitty-direct sends a
+PNG file name (f=100, t=f), which Limpet does not read. The terminal size
+came only from Limpet's presentation reply.
+Solution: src/logo/image/image_aros.c implements kitty and kitty-direct.
+The picture is decoded by the system's picture datatypes (any format they
+read; datatypes.library is opened only then), scaled by area averaging
+into whole text cells at the cell size the terminal reports through the
+public console geometry packet (ACTION_CONSOLE_GETGEOMETRY), and sent as
+RGBA with the Limpet SDK's Kitty encoder. Nothing is sent unless the
+terminal confirms the subset in its presentation reply
+(XTY_FEATURE_KITTY_GRAPHICS), never in pipe mode; otherwise the small
+text logo is shown. Automatic logo detection asks the same capability
+instead of a terminal name. The terminal size is taken from the geometry
+packet first (Limpet 0.7.0 and any console that takes it up), then from
+the presentation reply.
+Scope: logo/image/image_aros.c (new), logo/logo.c (AROS: capability test,
+small fallback for an image that cannot be shown),
+detection/terminalsize/terminalsize_aros.c, CMakeLists.txt (the new file,
+FF_HAVE_IMAGE_LOGO for AROS; ENABLE_IMAGE_LOGO stays off).
+Upstream-Status: AROS only; part of the AROS backend.
+Verification: host test of the scaling (tests/test_port.py); cross-built
+for the three targets. Guest runs: docs/evidence/2026-10-27-r2/.
+Removal: with the AROS backend.
+---
+ CMakeLists.txt                                |   6 +-
+ .../terminalsize/terminalsize_aros.c          |  17 +-
+ src/logo/image/image_aros.c                   | 260 ++++++++++++++++++
+ src/logo/logo.c                               |  16 ++
+ 4 files changed, 296 insertions(+), 3 deletions(-)
+ create mode 100644 src/logo/image/image_aros.c
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 950f672..667a48e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1478,6 +1478,9 @@ elseif(AROS)
+     if(FF_AROS_TARGET MATCHES "-abiv11-")
+         list(APPEND LIBFASTFETCH_SRC src/common/aros/aros_compat_abiv11.c)
+     endif()
++    # Image logos without ImageMagick (ENABLE_IMAGE_LOGO stays off): the
++    # system's datatypes decode, the Limpet SDK sends (image_aros.c).
++    list(APPEND LIBFASTFETCH_SRC src/logo/image/image_aros.c)
+ elseif(GNU)
+     list(APPEND LIBFASTFETCH_SRC
+         src/common/impl/dbus.c
+@@ -1756,7 +1759,8 @@ elseif(AROS)
+     # _BSD_SOURCE: the BSD types AROSTCP's net/ headers use. No dlopen.
+     target_compile_definitions(libfastfetch PUBLIC _GNU_SOURCE _BSD_SOURCE PATH_MAX=1024
+         IF_NAMESIZE=IFNAMSIZ FF_DISABLE_DLOPEN
+-        FF_HAVE_NO_GL) # the SDK has EGL headers, but the OpenGL module is not supported here
++        FF_HAVE_NO_GL # the SDK has EGL headers, but the OpenGL module is not supported here
++        FF_HAVE_IMAGE_LOGO=1) # kitty and kitty-direct only, src/logo/image/image_aros.c
+     if(FF_AROS_TARGET)
+         target_compile_definitions(libfastfetch PUBLIC FF_AROS_TARGET="${FF_AROS_TARGET}")
+     endif()
+diff --git a/src/detection/terminalsize/terminalsize_aros.c b/src/detection/terminalsize/terminalsize_aros.c
+index 49b0631..c784e5e 100644
+--- a/src/detection/terminalsize/terminalsize_aros.c
++++ b/src/detection/terminalsize/terminalsize_aros.c
+@@ -1,9 +1,22 @@
+ #include "terminalsize.h"
+ #include "common/aros/aros_terminal.h"
+ 
++#include <proto/dos.h>
++
+ bool ffDetectTerminalSize(FFTerminalSizeResult* result, [[maybe_unused]] bool fastOnly) {
+-    // The size the console reports in its presentation reply. CON: reports
+-    // none; its own size request is a console.device unit, not read here.
++    // The public console geometry packet (ACTION_CONSOLE_GETGEOMETRY):
++    // Limpet 0.7.0 and later, and any console that takes it up. CON: of
++    // today does not know it; its window size is not read any other way
++    // (ACTION_DISK_INFO's id_InUse is not reliably a console unit).
++    LimpetGeometry geometry;
++    if (limpet_query_geometry(Output(), &geometry, nullptr) == LIMPET_OK) {
++        result->columns = (uint16_t) geometry.columns;
++        result->rows = (uint16_t) geometry.rows;
++        result->width = (uint16_t) geometry.width;
++        result->height = (uint16_t) geometry.height;
++        return true;
++    }
++    // Older Limpet: the size in its presentation reply.
+     const LimpetPresentation* p = ffArosTerminalPresentation();
+     if (!p || !limpet_columns(p)) {
+         return false;
+diff --git a/src/logo/image/image_aros.c b/src/logo/image/image_aros.c
+new file mode 100644
+index 0000000..0db8887
+--- /dev/null
++++ b/src/logo/image/image_aros.c
+@@ -0,0 +1,260 @@
++// Image logos on AROS: kitty and kitty-direct, both drawn the same way.
++// The picture is decoded by the system's datatypes (any format a
++// picture datatype reads: PNG, IFF ILBM, JPEG, ...), scaled here to whole
++// text cells, and sent as raw RGBA through the Kitty graphics subset with
++// the Limpet SDK's encoder. Upstream's kitty-direct hands the terminal a
++// PNG file name (f=100,t=f); Limpet reads neither PNG nor files, and needs
++// no file access for a logo.
++//
++// Nothing is sent unless the terminal confirmed the subset
++// (XTY_FEATURE_KITTY_GRAPHICS) and reported its cell size in pixels
++// (ACTION_CONSOLE_GETGEOMETRY): CON: would print the base64 as text. The
++// caller falls back to a text logo when this returns false.
++#include "image.h"
++#include "common/aros/aros_terminal.h"
++#include "common/printing.h"
++
++#include <proto/exec.h>
++#include <proto/dos.h>
++// Opened only while a picture is drawn: a program-wide base would make
++// datatypes.library a condition of starting at all.
++#define __DATATYPES_NOLIBBASE__
++#include <proto/datatypes.h>
++#include <dos/dosextens.h>
++#include <datatypes/pictureclass.h>
++#include <limpet/limpet.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++// An id of our own: drawing again replaces the previous fastfetch logo
++// (--dynamic-interval) instead of filling the terminal's 16 image slots.
++#define FF_AROS_LOGO_IMAGE_ID 0x46466c67u // "FFlg"
++// Columns when neither --logo-width nor --logo-height is given.
++#define FF_AROS_LOGO_DEFAULT_COLUMNS 28u
++
++typedef struct {
++    uint8_t* rgba;
++    uint32_t width, height;
++} Picture;
++
++static struct Library* DataTypesBase;
++
++static const char* loadPicture(const char* path, Picture* out) {
++    struct Process* self = (struct Process*) FindTask(nullptr);
++    APTR window = self->pr_WindowPtr;
++    self->pr_WindowPtr = (APTR) -1; // no "insert volume" requester
++    Object* o = NewDTObject((APTR) path, DTA_GroupID, GID_PICTURE, PDTA_DestMode, PMODE_V43, PDTA_Remap, FALSE, TAG_DONE);
++    self->pr_WindowPtr = window;
++    if (!o) {
++        return "No picture datatype could read the file";
++    }
++    const char* error = nullptr;
++    struct BitMapHeader* bmh = nullptr;
++    if (GetDTAttrs(o, PDTA_BitMapHeader, (IPTR) &bmh, TAG_DONE) != 1 || !bmh || !bmh->bmh_Width || !bmh->bmh_Height) {
++        error = "The picture has no size";
++    } else if (bmh->bmh_Width > 4096 || bmh->bmh_Height > 4096) {
++        error = "The picture is larger than 4096x4096";
++    } else {
++        out->width = bmh->bmh_Width;
++        out->height = bmh->bmh_Height;
++        out->rgba = malloc((size_t) out->width * out->height * 4);
++        if (!out->rgba) {
++            error = "Not enough memory for the picture";
++        } else {
++            // A picture without alpha reads with alpha 0xff
++            // (picture.datatype's RGB to RGBA conversion).
++            struct pdtBlitPixelArray read = {
++                .MethodID = PDTM_READPIXELARRAY,
++                .pbpa_PixelData = out->rgba,
++                .pbpa_PixelFormat = PBPAFMT_RGBA,
++                .pbpa_PixelArrayMod = out->width * 4,
++                .pbpa_Left = 0,
++                .pbpa_Top = 0,
++                .pbpa_Width = out->width,
++                .pbpa_Height = out->height,
++            };
++            if (!DoDTMethodA(o, nullptr, nullptr, (Msg) &read)) {
++                free(out->rgba);
++                out->rgba = nullptr;
++                error = "The datatype could not deliver the pixels";
++            }
++        }
++    }
++    DisposeDTObject(o);
++    return error;
++}
++
++// Area-average scaling of `in` into a box of boxW x boxH, keeping the
++// aspect ratio and centring; the rest of the box stays transparent.
++// Colours are averaged weighted by alpha, so transparent pixels do not
++// darken the edges.
++static void scaleInto(const Picture* in, uint8_t* box, uint32_t boxW, uint32_t boxH) {
++    memset(box, 0, (size_t) boxW * boxH * 4);
++    uint32_t w = boxW, h = (uint32_t) ((uint64_t) in->height * boxW / in->width);
++    if (h > boxH) {
++        h = boxH;
++        w = (uint32_t) ((uint64_t) in->width * boxH / in->height);
++    }
++    // A picture far wider (or taller) than the box still gets a line.
++    if (!w) {
++        w = 1;
++    }
++    if (!h) {
++        h = 1;
++    }
++    uint32_t offX = (boxW - w) / 2, offY = (boxH - h) / 2;
++    for (uint32_t y = 0; y < h; ++y) {
++        uint32_t sy0 = (uint32_t) ((uint64_t) y * in->height / h);
++        uint32_t sy1 = (uint32_t) ((uint64_t) (y + 1) * in->height / h);
++        if (sy1 <= sy0) {
++            sy1 = sy0 + 1;
++        }
++        for (uint32_t x = 0; x < w; ++x) {
++            uint32_t sx0 = (uint32_t) ((uint64_t) x * in->width / w);
++            uint32_t sx1 = (uint32_t) ((uint64_t) (x + 1) * in->width / w);
++            if (sx1 <= sx0) {
++                sx1 = sx0 + 1;
++            }
++            uint64_t r = 0, g = 0, b = 0, a = 0, n = 0;
++            for (uint32_t sy = sy0; sy < sy1 && sy < in->height; ++sy) {
++                const uint8_t* p = in->rgba + ((size_t) sy * in->width + sx0) * 4;
++                for (uint32_t sx = sx0; sx < sx1 && sx < in->width; ++sx, p += 4) {
++                    r += (uint64_t) p[0] * p[3];
++                    g += (uint64_t) p[1] * p[3];
++                    b += (uint64_t) p[2] * p[3];
++                    a += p[3];
++                    ++n;
++                }
++            }
++            uint8_t* d = box + ((size_t) (y + offY) * boxW + x + offX) * 4;
++            if (a) {
++                d[0] = (uint8_t) (r / a);
++                d[1] = (uint8_t) (g / a);
++                d[2] = (uint8_t) (b / a);
++            }
++            d[3] = (uint8_t) (n ? a / n : 0);
++        }
++    }
++}
++
++static int writeStdout(void* context, const char* bytes, size_t length) {
++    (void) context;
++    return fwrite(bytes, 1, length, stdout) != length;
++}
++
++static bool fail(bool printError, const char* error) {
++    if (printError) {
++        fprintf(stderr, "Logo (kitty on AROS): %s\n", error);
++    }
++    return false;
++}
++
++bool ffLogoPrintImageIfExists(FFLogoType type, bool printError) {
++    FFOptionsLogo* options = &instance.config.logo;
++
++    if (type != FF_LOGO_TYPE_IMAGE_KITTY && type != FF_LOGO_TYPE_IMAGE_KITTY_DIRECT) {
++        return fail(printError, "only the kitty and kitty-direct types are available on AROS");
++    }
++    if (instance.config.display.pipe) {
++        return fail(printError, "no image in pipe mode (redirected output, or a console without colours)");
++    }
++    if (!limpet_has_kitty_graphics(ffArosTerminalPresentation())) {
++        return fail(printError, "the terminal does not confirm Kitty graphics (Limpet 0.8.0 does)");
++    }
++    LimpetGeometry geometry;
++    if (limpet_query_geometry(Output(), &geometry, nullptr) != LIMPET_OK || !geometry.width || !geometry.height) {
++        return fail(printError, "the terminal does not report its cell size in pixels");
++    }
++    uint32_t cellW = geometry.width / geometry.columns, cellH = geometry.height / geometry.rows;
++    if (!cellW || !cellH) {
++        return fail(printError, "the terminal reports an empty cell");
++    }
++
++    Picture picture = {};
++    DataTypesBase = OpenLibrary((CONST_STRPTR) "datatypes.library", 39);
++    if (!DataTypesBase) {
++        return fail(printError, "datatypes.library is not available");
++    }
++    const char* error = loadPicture(options->source.chars, &picture);
++    CloseLibrary(DataTypesBase);
++    DataTypesBase = nullptr;
++    if (error) {
++        return fail(printError, error);
++    }
++
++    // Cells: what was asked, else the width with the height from the
++    // picture's aspect ratio (rounded to whole rows).
++    uint32_t columns = options->width, rows = options->height;
++    if (!columns && rows) {
++        columns = (uint32_t) (((uint64_t) rows * cellH * picture.width / picture.height + cellW / 2) / cellW);
++    }
++    if (!columns) {
++        columns = FF_AROS_LOGO_DEFAULT_COLUMNS;
++    }
++    if (!rows) {
++        rows = (uint32_t) (((uint64_t) columns * cellW * picture.height / picture.width + cellH / 2) / cellH);
++    }
++    if (!columns || !rows) {
++        columns = rows = 1;
++    }
++    // Limpet's limits: 1024 pixels a side, 4 MiB per image.
++    while ((uint64_t) columns * cellW > LIMPET_KITTY_MAX_SIDE || (uint64_t) rows * cellH > LIMPET_KITTY_MAX_SIDE ||
++           (uint64_t) columns * cellW * rows * cellH * 4 > LIMPET_KITTY_MAX_BYTES) {
++        if (columns > 1) {
++            --columns;
++        }
++        if (rows > 1) {
++            --rows;
++        }
++        if (columns == 1 && rows == 1) {
++            break;
++        }
++    }
++
++    ffLogoResolveAutoPosition(columns + options->paddingLeft + options->paddingRight);
++    if (options->position == FF_LOGO_POSITION_RIGHT) {
++        free(picture.rgba);
++        return fail(printError, "position right is not available for images on AROS");
++    }
++
++    LimpetImage image = {
++        .id = FF_AROS_LOGO_IMAGE_ID,
++        .width = columns * cellW,
++        .height = rows * cellH,
++        .format = 32,
++        .keep_cursor = 0, // the cursor ends on the image's last row; it scrolls into view first
++        .quiet = 2,       // no reply: it would arrive as input
++    };
++    uint8_t* box = malloc((size_t) image.width * image.height * 4);
++    if (!box) {
++        free(picture.rgba);
++        return fail(printError, "not enough memory for the scaled picture");
++    }
++    scaleInto(&picture, box, image.width, image.height);
++    free(picture.rgba);
++
++    // The layout of upstream's kitty-direct with a known size: padding,
++    // the image, a line feed under it, then back up to the logo's first
++    // row, where the module lines start.
++    ffPrintCharTimes('\n', options->paddingTop);
++    if (options->paddingLeft) {
++        printf("\033[%uC", (unsigned) options->paddingLeft);
++    }
++    fflush(stdout);
++    int rc = limpet_kitty_transmit(&image, box, writeStdout, nullptr);
++    free(box);
++    if (rc) {
++        return fail(printError, "writing the image failed");
++    }
++    putchar('\n');
++    if (options->position == FF_LOGO_POSITION_LEFT) {
++        instance.state.logoWidth = columns + options->paddingLeft + options->paddingRight;
++        instance.state.logoHeight = options->paddingTop + rows;
++        printf("\033[%uA", (unsigned) instance.state.logoHeight);
++    } else { // top
++        instance.state.logoWidth = instance.state.logoHeight = 0;
++        ffPrintCharTimes('\n', options->paddingRight);
++    }
++    return true;
++}
+diff --git a/src/logo/logo.c b/src/logo/logo.c
+index fbadcc8..172883a 100644
+--- a/src/logo/logo.c
++++ b/src/logo/logo.c
+@@ -8,6 +8,9 @@
+ #include "detection/os/os.h"
+ #include "detection/terminalshell/terminalshell.h"
+ #include "detection/terminalsize/terminalsize.h"
++#ifdef __AROS__
++    #include "common/aros/aros_terminal.h"
++#endif
+ 
+ #include <ctype.h>
+ #include <stdlib.h>
+@@ -667,6 +670,15 @@ void ffLogoPrint(void) {
+                 }
+             }
+ 
++#ifdef __AROS__
++            // An image the terminal cannot show (CON:, redirected output)
++            // gives way to the small text logo: the module lines were laid
++            // out next to an image, not next to the wide text logo.
++            if (options->type == FF_LOGO_TYPE_IMAGE_KITTY || options->type == FF_LOGO_TYPE_IMAGE_KITTY_DIRECT) {
++                ffLogoPrintDetected(FF_LOGO_SIZE_SMALL);
++                return;
++            }
++#endif
+             ffLogoPrintDetected(FF_LOGO_SIZE_UNKNOWN);
+         }
+         return;
+@@ -704,6 +716,10 @@ void ffLogoPrint(void) {
+                 ffStrbufIgnCaseEqualS(&terminal->processName, "wezterm") ||
+                 ffStrbufIgnCaseEqualS(&terminal->processName, "wayst") ||
+                 ffStrbufIgnCaseEqualS(&terminal->processName, "ghostty") ||
++        #ifdef __AROS__
++                // Asked of the terminal, not guessed from its name.
++                limpet_has_kitty_graphics(ffArosTerminalPresentation()) ||
++        #endif
+         #ifdef __APPLE__
+                 ffStrbufIgnCaseEqualS(&terminal->processName, "WarpTerminal") ||
+         #else

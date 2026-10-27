@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 08:59:39 +0100
+Subject: [PATCH] AROS: Command module: quoted program path, one output file
+ per command
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: with an explicit "shell" (a program), its path went into the
+Shell line unquoted, so a program in a drawer with a space in its name
+was split into two words. And every command of a task wrote to the same
+file in T:, while the Command module starts all commands (parallel, its
+default) before it reads the first: a second command could not create
+the file still open for the first.
+Solution: the program is quoted with the AmigaDOS rules already used for
+its arguments ("..." with *" and **); the Shell finds a quoted name in
+its path as well. Each command gets its own T: file, found again by its
+descriptor when its output is read, and deleted then. The command-line
+mode (an empty "shell", the AROS default) is unchanged.
+Scope: common/impl/processing_aros.c.
+Upstream-Status: AROS only; part of the AROS backend.
+Verification: host test of the quoting (tests/test_port.py); cross-built
+for the three targets. Guest runs: docs/evidence/2026-10-27-r2/.
+Removal: with the AROS backend.
+---
+ src/common/impl/processing_aros.c | 65 +++++++++++++++++++++++--------
+ 1 file changed, 48 insertions(+), 17 deletions(-)
+
+diff --git a/src/common/impl/processing_aros.c b/src/common/impl/processing_aros.c
+index ecc3e42..bba2c0b 100644
+--- a/src/common/impl/processing_aros.c
++++ b/src/common/impl/processing_aros.c
+@@ -15,12 +15,24 @@
+ //
+ // An empty argv[0] means the AROS Shell itself: argv[1] is a command line,
+ // passed as it is (the Command module's default on AROS, which has no
+-// /bin/sh -c). Otherwise argv[0] is a command looked up in the Shell's path
+-// and the other arguments are quoted.
++// /bin/sh -c). Otherwise argv[0] is a program, a name the Shell looks up in
++// its path or a full AmigaDOS path, and it is quoted like the arguments: the
++// Shell finds a quoted name in its path too, and a drawer with a space in
++// its name would otherwise split the line.
++//
++// Commands run one after another, but their output is read later: the
++// Command module starts every command before it prints the first. So each
++// command gets its own file, found again by its descriptor.
++
++#define FF_AROS_MAX_OUTPUTS 32
++static struct {
++    int fd;
++    unsigned serial;
++} outputs[FF_AROS_MAX_OUTPUTS];
++static unsigned nextSerial;
+ 
+-// One file per task: a task runs one command at a time.
+-static void outputPath(char* path, size_t size) {
+-    snprintf(path, size, "T:fastfetch-%p.out", (void*) FindTask(nullptr));
++static void outputPath(char* path, size_t size, unsigned serial) {
++    snprintf(path, size, "T:fastfetch-%p-%u.out", (void*) FindTask(nullptr), serial);
+ }
+ 
+ static bool appendQuoted(char* line, size_t size, size_t* length, const char* arg) {
+@@ -60,20 +72,24 @@ const char* ffProcessSpawn(char* const argv[], FFProcessOutputType useOutput, [[
+         length = (size_t) snprintf(line, sizeof(line), "%s ", argv[1]);
+         first = 2;
+     } else {
+-        // The program name is not quoted: the Shell looks it up in its path.
+-        if (strlen(argv[0]) + 2 >= sizeof(line)) {
+-            return "Command is too long";
+-        }
+-        length = (size_t) snprintf(line, sizeof(line), "%s ", argv[0]);
++        first = 0;
+     }
+-    for (unsigned i = first; argv[i - 1] && argv[i]; ++i) {
++    for (unsigned i = first; argv[i]; ++i) { // argv[1] exists when first is 2
+         if (!appendQuoted(line, sizeof(line), &length, argv[i])) {
+             return "Command is too long or contains a line feed";
+         }
+     }
+ 
+-    char path[64];
+-    outputPath(path, sizeof(path));
++    unsigned slot = 0;
++    while (slot < FF_AROS_MAX_OUTPUTS && outputs[slot].fd > 0) {
++        ++slot;
++    }
++    if (slot == FF_AROS_MAX_OUTPUTS) {
++        return "Too many commands waiting to be read";
++    }
++    unsigned serial = ++nextSerial;
++    char path[80];
++    outputPath(path, sizeof(path), serial);
+     BPTR output = Open((CONST_STRPTR) path, MODE_NEWFILE);
+     if (!output) {
+         return "Cannot create the command's output file in T:";
+@@ -101,20 +117,35 @@ const char* ffProcessSpawn(char* const argv[], FFProcessOutputType useOutput, [[
+     }
+     outHandle->pid = (pid_t) rc;
+     outHandle->pipeRead = open(path, O_RDONLY);
+-    if (outHandle->pipeRead < 0) {
++    if (outHandle->pipeRead <= 0) { // 0 is stdin, never a file opened here
++        if (outHandle->pipeRead == 0) {
++            close(outHandle->pipeRead);
++        }
++        outHandle->pipeRead = -1;
+         DeleteFile((CONST_STRPTR) path);
+         return "Cannot read the command's output";
+     }
++    outputs[slot].fd = outHandle->pipeRead;
++    outputs[slot].serial = serial;
+     return nullptr;
+ }
+ 
+ const char* ffProcessReadOutput(FFProcessHandle* handle, FFstrbuf* buffer) {
+     bool ok = ffAppendFDBuffer(handle->pipeRead, buffer);
++    unsigned serial = 0;
++    for (unsigned slot = 0; slot < FF_AROS_MAX_OUTPUTS; ++slot) {
++        if (outputs[slot].fd == handle->pipeRead) {
++            serial = outputs[slot].serial;
++            outputs[slot].fd = 0;
++        }
++    }
+     close(handle->pipeRead);
+     handle->pipeRead = -1;
+-    char path[64];
+-    outputPath(path, sizeof(path));
+-    DeleteFile((CONST_STRPTR) path); // closed now, so it can go
++    if (serial) {
++        char path[80];
++        outputPath(path, sizeof(path), serial);
++        DeleteFile((CONST_STRPTR) path); // closed now, so it can go
++    }
+     if (!ok) {
+         return "Reading the command's output failed";
+     }

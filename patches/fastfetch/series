@@ -6,3 +6,9 @@
 0006-aros-report-the-gpu-module-s-own-answer.patch
 0007-aros-disable-linewrap-in-con.patch
 0008-dynamic-interval-no-screen-control-in-pipe-mode.patch
+0009-aros-names-in-the-system-s-character-set.patch
+0010-aros-cpu-cores-only-as-far-as-the-system-reports.patch
+0011-aros-the-default-route-from-arostcp-s-routing-ta.patch
+0012-aros-command-module-quoted-program-path-one-outp.patch
+0013-logo-add-a-small-aros-logo.patch
+0014-aros-image-logos-through-datatypes-and-the-kitty.patch
