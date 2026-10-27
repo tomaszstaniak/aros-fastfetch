@@ -23,7 +23,7 @@
         "disableLinewrap": true,
         "separator": "  ",
         "key": {
-            "width": 10
+            "width": 11
         },
         "percent": {
             "type": ["num", "bar"]

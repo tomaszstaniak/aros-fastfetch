@@ -33,7 +33,8 @@ Use
 A terminal that reports its capabilities (Limpet 0.8.0 or later) gets
 colours, its name and version, UTF-8 text and pictures. The standard
 Shell window (CON:) gets plain text in the character set chosen in
-Locale preferences. Long lines are cut at the window's edge. Output redirected to a file, and
+Locale preferences; like other programs that use codesets.library,
+Fastfetch sees a new choice after the next restart. Long lines are cut at the window's edge. Output redirected to a file, and
 JSON, contain no escape sequences; there, and in CON:,
 --dynamic-interval prints each round after the last.
 

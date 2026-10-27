@@ -4,7 +4,7 @@
 ; Guest checks of the changes in 2.70.0-r2, after smoke.script:
 ;   Execute r2.script BIN=fastfetch OUT=RESULTS:<run directory> CMD=RAM:ff/r2-command.jsonc IP=RAM:ff/r2-ip.jsonc
 ; This file holds two ISO-8859-2 bytes (0xB1, 0xEA): the RAM: volume is
-; renamed "Dysk Бъ" for the character set runs and named "Ram Disk"
+; renamed "Dysk Бъ" for the character set runs and named "RAM Disk"
 ; again after them; ENV:CHARSET is set for them and removed again.
 FailAt 21
 MakeDir {OUT}
@@ -29,6 +29,9 @@ List T: PAT=fastfetch#? >{OUT}/r2-t-left.txt
 {BIN} -c aros-logo >{OUT}/r2-logo-redirected.txt
 Echo $RC >{OUT}/r2-logo-redirected.rc
 ; Names in the system's character set: ISO-8859-2 and a Polish name.
+; codesets.library reads the set when it is first opened: where it stays
+; open from boot (AROS One), this part shows the boot-time set, and the
+; check is SetEnv SAVE CHARSET and a restart instead.
 If EXISTS ENV:CHARSET
   Echo "ENV:CHARSET is set: the user's choice; not changed, no character set runs" >{OUT}/r2-latin2.txt
   Skip charset-done
@@ -40,7 +43,7 @@ Relabel RAM: "Dysk Бъ"
 {BIN} --format json -s Disk >{OUT}/r2-latin2.json
 Echo $RC >{OUT}/r2-latin2.rc
 {BIN} --logo none -s Disk >{OUT}/r2-latin2.txt
-Relabel RAM: "Ram Disk"
+Relabel RAM: "RAM Disk"
 UnSetEnv CHARSET
 Avail FLUSH >NIL:
 Info RAM: >{OUT}/r2-ram-after.txt
