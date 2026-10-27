@@ -125,6 +125,42 @@ int main(int argc, char** argv) {
             shutil.rmtree(d)
 
 
+@unittest.skipUnless((SRC / "common" / "aros" / "aros_text.h").exists() and shutil.which(CC),
+                     "work/fastfetch or a host C compiler is missing")
+class Latin1Names(unittest.TestCase):
+    def test_latin1_to_utf8(self):
+        d = Path(tempfile.mkdtemp(prefix="ff-host-"))
+        try:
+            harness = d / "t.c"
+            harness.write_text(r'''
+#include "common/aros/aros_text.h"
+#include <stdio.h>
+#include <stdlib.h>
+// The two out-of-line pieces of FFstrbuf the helper needs.
+char* CHAR_NULL_PTR = "";
+void ffStrbufEnsureFreeNoCheck(FFstrbuf* s, uint32_t free) {
+    uint32_t size = s->length + free + 1;
+    char* chars = s->allocated ? realloc(s->chars, size) : malloc(size);
+    if (!s->allocated) memcpy(chars, s->chars, s->length + 1);
+    s->chars = chars;
+    s->allocated = size;
+}
+int main(void) {
+    FFstrbuf a = ffStrbufCreate();
+    ffArosStrbufSetLatin1(&a, "Gr\xf6\xdf" "e:");
+    fwrite(a.chars, 1, a.length, stdout);
+    ffArosStrbufAppendLatin1N(&a, "\xe9x", 1);
+    fwrite(a.chars, 1, a.length, stdout);
+    return 0;
+}
+''')
+            exe = build("latin1", [harness], ["-Wno-unused-function", "-I", SRC / "3rdparty" / "yyjson"])
+            out = subprocess.run([exe], capture_output=True, check=True).stdout
+            self.assertEqual(out, "Größe:".encode() + "Größe:é".encode())
+        finally:
+            shutil.rmtree(d)
+
+
 class PatchTooling(unittest.TestCase):
     def test_header_fields(self):
         """Every saved patch carries every required header field."""
