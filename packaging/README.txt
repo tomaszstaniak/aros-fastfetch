@@ -52,6 +52,7 @@ Limitations
   says so and the rest of the output is unchanged.
 - The disk sizes are those the file system reports for each mounted volume.
 @PI@
+
 Licences
 --------
 Fastfetch is MIT-licensed (LICENSE.txt). It includes yyjson (MIT),
