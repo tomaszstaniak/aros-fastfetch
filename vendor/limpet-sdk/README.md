@@ -5,7 +5,7 @@ draws the output what it renders (colours, Amiga pens, UTF-8, size) and
 which terminal it is. Unchanged copies; MIT licence in LICENSE.txt.
 
 - Source: https://github.com/tomaszstaniak/limpet, `sdk/`
-- Revision: a516329ec2ea81acbd3088711aa98ef73b655dc1 (SDK 0.6.0, before its release)
+- Revision: e36cdd40ab3170aae119d2c0c38cf6d2b9d0aa0e (main; SDK 0.6.0, not yet in a Limpet release)
 
 Update by copying the four files from a newer Limpet SDK release; record
 the revision here.
