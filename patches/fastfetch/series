@@ -5,3 +5,4 @@
 0005-aros-ctrl-c-ends-dynamic-interval.patch
 0006-aros-report-the-gpu-module-s-own-answer.patch
 0007-aros-disable-linewrap-in-con.patch
+0008-dynamic-interval-no-screen-control-in-pipe-mode.patch

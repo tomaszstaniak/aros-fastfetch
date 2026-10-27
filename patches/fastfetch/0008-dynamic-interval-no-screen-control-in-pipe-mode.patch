@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Tue, 27 Oct 2026 12:00:00 +0100
+Subject: [PATCH] Dynamic interval: no screen control in pipe mode
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: --dynamic-interval switches to the alternate screen, homes the
+cursor, clears to the end of the screen and moves past the logo with
+cursor sequences even with --pipe or redirected output. A file got escape
+sequences, and a console without those sequences (the AROS CON: window,
+written in pipe mode) showed "[?1049h" as text and printed each round
+below the last with the sequences in between.
+Solution: in pipe mode use none of them: each round follows the last on
+a new line, and the logo column after the first round is filled with
+spaces.
+Scope: fastfetch.c (the dynamic loop), common/impl/init.c (alternate
+screen), logo/logo.c (cursor movement past the logo, clear to end of
+line). Terminal output without --pipe is unchanged. All platforms.
+Upstream-Status: suitable for upstream.
+Verification: --dynamic-interval in CON: on pool v1-1 and v11-1, and
+redirected to a file there (2026-10-27): no escape sequences, Ctrl-C ends it.
+Removal: when upstream keeps pipe mode free of screen control.
+---
+ src/common/impl/init.c |  4 ++--
+ src/fastfetch.c        | 10 ++++++++--
+ src/logo/logo.c        |  8 ++++++--
+ 3 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/src/common/impl/init.c b/src/common/impl/init.c
+index 8aa4896..dbcad90 100644
+--- a/src/common/impl/init.c
++++ b/src/common/impl/init.c
+@@ -95,7 +95,7 @@ static void resetConsole(void) {
+         fputs("\033[?25h", stdout);
+     }
+ 
+-    if (instance.state.dynamicInterval > 0) {
++    if (instance.state.dynamicInterval > 0 && !instance.config.display.pipe) {
+         fputs("\033[?1049l", stdout); // Disable alternate buffer
+     }
+ 
+@@ -170,7 +170,7 @@ void ffStart(void) {
+         fputs(ffLinewrapOff, stdout);
+     }
+ 
+-    if (instance.state.dynamicInterval > 0) {
++    if (instance.state.dynamicInterval > 0 && !instance.config.display.pipe) {
+         fputs("\033[?1049h\033[H", stdout); // Enable alternate buffer
+         fflush(stdout);
+     }
+diff --git a/src/fastfetch.c b/src/fastfetch.c
+index 5c5e334..071f2b7 100644
+--- a/src/fastfetch.c
++++ b/src/fastfetch.c
+@@ -839,7 +839,9 @@ static void run(FFdata* data) {
+ 
+         if (instance.state.dynamicInterval > 0) {
+             ffLogoPrintRemaining(); // `logoLineCacheClear` inside so that ffLogoPrintLine will use `\e[nC` to move the cursor to the right position instead of reprinting the logo
+-            fputs("\e[J", stdout); // Clear from cursor to the end of the screen to prevent artifacts when the new output is shorter than the previous one
++            if (!instance.config.display.pipe) {
++                fputs("\e[J", stdout); // Clear from cursor to the end of the screen to prevent artifacts when the new output is shorter than the previous one
++            }
+             fflush(stdout);
+             if (!ffTimeSleep(instance.state.dynamicInterval)) {
+                 // Interrupted where no signal handler ends the program
+@@ -847,7 +849,11 @@ static void run(FFdata* data) {
+                 // console (ffFinish).
+                 break;
+             }
+-            fputs("\e[H", stdout); // Move cursor to the top left corner to overwrite the previous output
++            if (instance.config.display.pipe) {
++                fputc('\n', stdout); // plain output: each round follows the last
++            } else {
++                fputs("\e[H", stdout); // Move cursor to the top left corner to overwrite the previous output
++            }
+             instance.state.keysHeight = 0; // Reset keysHeight so `ffLogoPrintRemaining` will recalculate it
+             ffCacheInvalidateAll(); // Drop the detection results cached for the previous round, so that this round re-detects them
+         } else {
+diff --git a/src/logo/logo.c b/src/logo/logo.c
+index 9a580e4..fbadcc8 100644
+--- a/src/logo/logo.c
++++ b/src/logo/logo.c
+@@ -762,10 +762,14 @@ void ffLogoPrintLine(void) {
+             ffPrintCharTimes(' ', instance.state.logoWidth);
+         }
+     } else if (instance.state.logoWidth > 0) {
+-        printf("\033[%uC", instance.state.logoWidth);
++        if (instance.config.display.pipe) {
++            ffPrintCharTimes(' ', instance.state.logoWidth); // plain output has no cursor movement
++        } else {
++            printf("\033[%uC", instance.state.logoWidth);
++        }
+     }
+ 
+-    if (instance.state.dynamicInterval > 0 && logo->position == FF_LOGO_POSITION_LEFT) {
++    if (instance.state.dynamicInterval > 0 && logo->position == FF_LOGO_POSITION_LEFT && !instance.config.display.pipe) {
+         fputs("\033[K", stdout); // Clear to the end of the line
+         // Note that we don't clear the line when the logo is on the right, as it will also clear the logo itself
+     }
