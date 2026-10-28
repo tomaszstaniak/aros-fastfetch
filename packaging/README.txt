@@ -40,9 +40,9 @@ JSON, contain no escape sequences; there, and in CON:,
 
 Configuration
 -------------
-In Limpet, Settings > Preferences can run Fastfetch whenever a new Shell
-window opens, with the compact view or the picture, and with groups of
-lines left out; no file needs editing for that.
+In Limpet 0.8.0 and later, Project > Preferences... can run Fastfetch
+whenever a new Shell window opens, with the compact view or the picture,
+and with groups of lines left out; no file needs editing for that.
 
     fastfetch -c aros-compact    the compact view (also what plain
                                  fastfetch shows without a file of yours)
