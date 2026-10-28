@@ -79,7 +79,7 @@
         },
         { "type": "break", "group": "memory-disks" },
         { "type": "custom", "group": "network", "format": "{#cyan}Network" },
-        { "type": "localip", "group": "network" },
+        { "type": "localip", "group": "network", "key": "IP {ifname}" },
         { "type": "break", "group": "network" },
         "colors"
     ]
