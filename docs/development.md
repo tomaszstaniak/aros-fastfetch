@@ -64,6 +64,16 @@ both back; with ENV:CHARSET already set it skips that part):
 Execute r2.script BIN=<drawer>/fastfetch OUT=<results drawer> CMD=<drawer>/r2-command.jsonc
 ```
 
+`tests/aros/r3.script` covers 2.70.0-r3: which configuration is read (a
+file in ENV: and a different one in ENVARC:, then neither), `--gen-config`,
+groups left out with `--structure-disabled`, JSON of the picture preset and
+a huge `--logo-width`. It skips the order checks when either file is
+already there:
+
+```
+Execute r3.script BIN=<drawer>/fastfetch OUT=<results drawer> DIR=<drawer with r3-kept.jsonc and r3-session.jsonc>
+```
+
 Console output (CON:, Limpet: the compact view, the picture logo, a narrow
 window through Limpet's `win-inject`), Ctrl-C and timing are checked by
 hand.
