@@ -1,0 +1,2 @@
+// r3.script: the kept file (ENVARC:fastfetch/config.jsonc).
+{ "logo": { "type": "none" }, "modules": [ { "type": "custom", "format": "R3-KEPT-FILE" } ] }

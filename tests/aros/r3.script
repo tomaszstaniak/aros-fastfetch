@@ -1,0 +1,54 @@
+.KEY BIN/A,OUT/A,DIR/A
+.BRA {
+.KET }
+; Guest checks of the changes in 2.70.0-r3:
+;   Execute r3.script BIN=<drawer>/fastfetch OUT=RESULTS:<run directory> DIR=<drawer with r3-kept.jsonc and r3-session.jsonc>
+; Which configuration is read: ENV: first, then ENVARC:, then the package's
+; aros-compact preset. A user's own files are never touched: with either
+; already there, that part is skipped.
+FailAt 21
+MakeDir {OUT}
+If EXISTS ENVARC:fastfetch/config.jsonc
+  Echo "ENVARC:fastfetch/config.jsonc exists: the user's; order checks skipped" >{OUT}/r3-order.txt
+  Skip order-done
+EndIf
+If EXISTS ENV:fastfetch/config.jsonc
+  Echo "ENV:fastfetch/config.jsonc exists: the user's; order checks skipped" >{OUT}/r3-order.txt
+  Skip order-done
+EndIf
+If NOT EXISTS ENVARC:fastfetch
+  MakeDir ENVARC:fastfetch
+EndIf
+If NOT EXISTS ENV:fastfetch
+  MakeDir ENV:fastfetch
+EndIf
+Copy {DIR}/r3-kept.jsonc ENVARC:fastfetch/config.jsonc QUIET
+Copy {DIR}/r3-session.jsonc ENV:fastfetch/config.jsonc QUIET
+{BIN} --list-config-paths >{OUT}/r3-paths-both.txt
+{BIN} --pipe >{OUT}/r3-both.txt
+Echo $RC >{OUT}/r3-both.rc
+Delete ENV:fastfetch/config.jsonc QUIET
+{BIN} --pipe >{OUT}/r3-kept.txt
+Echo $RC >{OUT}/r3-kept.rc
+Delete ENVARC:fastfetch/config.jsonc QUIET
+{BIN} --list-config-paths >{OUT}/r3-paths-none.txt
+{BIN} --pipe >{OUT}/r3-none.txt
+Echo $RC >{OUT}/r3-none.rc
+; --gen-config writes the kept file and says when ENV: has one.
+Copy {DIR}/r3-session.jsonc ENV:fastfetch/config.jsonc QUIET
+{BIN} --gen-config >{OUT}/r3-gen.txt
+Echo $RC >{OUT}/r3-gen.rc
+List ENVARC:fastfetch LFORMAT "%n %l" >{OUT}/r3-gen-list.txt
+Delete ENVARC:fastfetch/config.jsonc ENV:fastfetch/config.jsonc QUIET
+Lab order-done
+; Groups left out by name, heading and break included.
+{BIN} -c aros-logo --pipe --structure-disabled network:hardware >{OUT}/r3-logo-no-net-hw.txt
+Echo $RC >{OUT}/r3-logo-no-net-hw.rc
+{BIN} -c aros-compact --pipe --structure-disabled system >{OUT}/r3-compact-no-system.txt
+Echo $RC >{OUT}/r3-compact-no-system.rc
+{BIN} -c aros-logo --format json >{OUT}/r3-logo.json
+Echo $RC >{OUT}/r3-logo-json.rc
+{BIN} -c aros-logo --pipe --logo-width 4294967295 >{OUT}/r3-logo-huge.txt
+Echo $RC >{OUT}/r3-logo-huge.rc
+Echo "done" >{OUT}/r3-done.txt
+Echo "r3 done"

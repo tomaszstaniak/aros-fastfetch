@@ -1,0 +1,2 @@
+// r3.script: the session's file (ENV:fastfetch/config.jsonc).
+{ "logo": { "type": "none" }, "modules": [ { "type": "custom", "format": "R3-SESSION-FILE" } ] }
