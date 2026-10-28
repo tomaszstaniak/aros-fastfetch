@@ -26,17 +26,21 @@ Unpack the archive, add its drawer to the Shell's path
 Fastfetch on other systems: `fastfetch --help`, `--format json`,
 `-c <preset>`, `--logo none`, `--dynamic-interval <ms>` (ends with Ctrl-C).
 
-Without options it shows the compact view of `share/fastfetch/config.jsonc`
-in the package: the small logo, above the list when the window is too narrow
-for it beside (in terminals that report their width), and lines cut at the
-window's edge instead of wrapped. `fastfetch -c aros-logo` shows the AROS
-logo as a picture with the details in groups and bars, in terminals that
-confirm Kitty graphics (Limpet 0.8.0 and later), and the small text logo
-elsewhere; `--logo FILE` takes any picture a datatype of the system reads.
+Without options it shows the compact view, the preset `aros-compact`: the
+small logo, above the list when the window is too narrow for it beside (in
+terminals that report their width), and lines cut at the window's edge
+instead of wrapped. `fastfetch -c aros-logo` shows the AROS logo as a
+picture with the details in groups and bars, in terminals that confirm Kitty
+graphics (Limpet 0.8.0 and later), and the small text logo elsewhere;
+`--logo FILE` takes any picture a datatype of the system reads. Both presets
+name their groups of lines (`system`, `hardware`, `memory-disks`,
+`network`), and `--structure-disabled network:hardware` leaves groups out.
 
-`fastfetch --gen-config` writes `ENVARC:fastfetch/config.jsonc`. Fastfetch
-reads `ENVARC:fastfetch/`, then `ENV:fastfetch/`, then `share/fastfetch/` in
-its own drawer. Presets are in `share/fastfetch/presets` in the drawer.
+Fastfetch reads `ENV:fastfetch/config.jsonc` (this session's copy), then
+`ENVARC:fastfetch/config.jsonc` (kept over a restart), then the
+`aros-compact` preset. `fastfetch --gen-config` writes
+`ENVARC:fastfetch/config.jsonc`. Presets are in `share/fastfetch/presets`
+in the drawer.
 
 Colours, the terminal's name and UTF-8 text depend on what the console
 reports through the Limpet capabilities contract on the actual output

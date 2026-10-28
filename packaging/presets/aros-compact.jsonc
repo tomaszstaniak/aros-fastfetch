@@ -1,0 +1,57 @@
+// Fastfetch on AROS: the compact view.   fastfetch -c aros-compact
+//
+// This is also what plain "fastfetch" shows when you have no configuration
+// of your own. Fastfetch reads ENV:fastfetch/config.jsonc, then
+// ENVARC:fastfetch/config.jsonc, then this file. To change it, copy it to
+// ENVARC:fastfetch/config.jsonc (and ENV:fastfetch/ to see it at once) and
+// edit that copy, or write a full one with  fastfetch --gen-config
+//
+// The small logo goes above the list when the window is too narrow for it
+// beside (Limpet reports its width; in CON: it stays on the left), and long
+// lines are cut at the window's edge instead of wrapping under the logo.
+//
+// "group" names a set of lines that --structure-disabled can leave out:
+// fastfetch -c aros-compact --structure-disabled network:hardware
+// Groups: system, hardware, memory-disks, network.
+{
+    "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
+    "logo": {
+        "type": "small",
+        "position": "auto",
+        "padding": {
+            "top": 1,
+            "right": 3
+        }
+    },
+    "display": {
+        "disableLinewrap": true
+    },
+    "modules": [
+        "title",
+        "separator",
+        { "type": "os", "group": "system" },
+        { "type": "kernel", "group": "system" },
+        { "type": "uptime", "group": "system" },
+        { "type": "shell", "group": "system" },
+        {
+            "type": "display",
+            "group": "hardware",
+            "key": "Display",
+            "format": "{width}x{height} ({name})"
+        },
+        { "type": "de", "group": "system", "key": "Desktop" },
+        { "type": "wm", "group": "system", "key": "WM" },
+        { "type": "terminal", "group": "system" },
+        { "type": "cpu", "group": "hardware" },
+        { "type": "memory", "group": "memory-disks" },
+        {
+            "type": "disk",
+            "group": "memory-disks",
+            "key": "Disk {name}"
+        },
+        { "type": "localip", "group": "network" },
+        { "type": "locale", "group": "system" },
+        "break",
+        "colors"
+    ]
+}

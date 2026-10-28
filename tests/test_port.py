@@ -3,7 +3,7 @@ the patch tooling. Run with `scripts/fastfetch.py test`.
 
 The C tests compile files of work/fastfetch with the host compiler; that is
 the series once `scripts/fastfetch.py verify` passes."""
-import importlib.util, os, shutil, subprocess, sys, tempfile, unittest
+import importlib.util, json, os, re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,11 +236,12 @@ class ImageScaling(unittest.TestCase):
         d = Path(tempfile.mkdtemp(prefix="ff-host-"))
         try:
             harness = d / "t.c"
-            harness.write_text("""#include <stdint.h>
+            harness.write_text("""#include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 typedef struct { uint8_t* rgba; uint32_t width, height; } Picture;
-""" + extract(SRC / "logo" / "image" / "image_aros.c", "// Area-average scaling", "static int writeStdout") + r'''
+""" + extract(SRC / "logo" / "image" / "image_aros.c", "// Area-average scaling", "// The image's size in cells") + r'''
 int main(void) {
     // 4x2 opaque: left half red, right half blue, into an 8x8 box: 8x4,
     // centred with two transparent rows above and below.
@@ -274,6 +275,70 @@ int main(void) {
             self.assertEqual(out.splitlines(), ["." * 8] * 2 + ["RRRRBBBB"] * 4 + ["." * 8] * 2 + ["255 255 255 127"])
         finally:
             shutil.rmtree(d)
+
+    def test_fit_cells_extremes(self):
+        # Limpet's limits with an 8x16 cell: 128 columns, 64 rows. Sizes up
+        # to 2^32-1 cells (and more, derived) come back at once, inside the
+        # limits, with the aspect ratio kept to the cell.
+        d = Path(tempfile.mkdtemp(prefix="ff-host-"))
+        try:
+            harness = d / "t.c"
+            harness.write_text("#include <math.h>\n#include <stdint.h>\n#include <stdio.h>\n" +
+                               extract(SRC / "logo" / "image" / "image_aros.c",
+                                       "// The image's size in cells", "static int writeStdout") + r'''
+#include <stdlib.h>
+int main(int argc, char** argv) {
+    (void) argc;
+    uint32_t c, r;
+    fitCells(strtoull(argv[1], 0, 10), strtoull(argv[2], 0, 10), (uint32_t) atoi(argv[3]), (uint32_t) atoi(argv[4]),
+             1024, 4u << 20, &c, &r);
+    printf("%u %u\n", c, r);
+    return 0;
+}
+''')
+            exe = build("fit", [harness], ["-lm"])
+            fit = lambda *a: subprocess.run([exe, *map(str, a)], capture_output=True, text=True,
+                                            check=True, timeout=5).stdout.split()
+            try:
+                big = 2**32 - 1
+                self.assertEqual(fit(28, 14, 8, 16), ["28", "14"])            # within the limits: as asked
+                self.assertEqual(fit(big, big, 8, 16), ["64", "64"])          # square stays square
+                self.assertEqual(fit(big, 1, 8, 16), ["128", "1"])            # very wide: one row
+                self.assertEqual(fit(1, big, 8, 16), ["1", "64"])             # very tall: one column
+                self.assertEqual(fit(big, big // 2, 8, 16), ["128", "64"])    # 2:1 in cells
+                self.assertEqual(fit(2**54, 2**53, 8, 16), ["128", "64"])     # derived sizes above 2^32
+                self.assertEqual(fit(0, 0, 8, 16), ["1", "1"])
+                self.assertEqual(fit(500, 300, 1024, 1024), ["1", "1"])       # one cell is the whole limit
+            finally:
+                shutil.rmtree(exe.parent)
+        finally:
+            shutil.rmtree(d)
+
+
+class Presets(unittest.TestCase):
+    """The packaged presets parse, and their groups are the four that Limpet
+    Preferences offers (fastfetch_hide in Limpet's settings)."""
+    GROUPS = {"system", "hardware", "memory-disks", "network"}
+
+    def load(self, name):
+        text = (ROOT / "packaging" / "presets" / name).read_text()
+        # Line comments only (no "//" inside the strings of these files).
+        return json.loads(re.sub(r"(?m)^\s*//.*$", "", text))
+
+    def test_groups(self):
+        for name in ("aros-compact.jsonc", "aros-logo.jsonc"):
+            with self.subTest(name):
+                modules = self.load(name)["modules"]
+                groups = {m["group"] for m in modules if isinstance(m, dict) and "group" in m}
+                self.assertEqual(groups, self.GROUPS)
+                # Title and colours stay whatever is left out.
+                self.assertIn("title", modules)
+                self.assertIn("colors", modules)
+
+    def test_compact_is_the_default(self):
+        self.assertFalse((ROOT / "packaging" / "fastfetch").exists())
+        header = (SRC / "common" / "FFPlatform.h").read_text()
+        self.assertIn('"fastfetch/presets/aros-compact.jsonc"', header)
 
 
 @unittest.skipUnless((SRC / "common" / "impl" / "processing_aros.c").exists() and shutil.which(CC),

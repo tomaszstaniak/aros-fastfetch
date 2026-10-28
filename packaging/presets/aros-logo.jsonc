@@ -6,6 +6,11 @@
 // text logo takes its place. Another picture: --logo FILE, any format a
 // picture datatype of your system reads; --logo-width sets its width in
 // columns.
+//
+// "group" names a set of lines that --structure-disabled can leave out,
+// heading and break included:
+// fastfetch -c aros-logo --structure-disabled network
+// Groups: system, hardware, memory-disks, network.
 {
     "$schema": "https://github.com/fastfetch-cli/fastfetch/raw/dev/doc/json_schema.json",
     "logo": {
@@ -42,50 +47,40 @@
     },
     "modules": [
         "title",
-        {
-            "type": "custom",
-            "format": "{#cyan}System"
-        },
-        "os",
-        "kernel",
-        "uptime",
-        {
-            "type": "de",
-            "key": "Desktop"
-        },
-        {
-            "type": "wm",
-            "key": "WM"
-        },
-        "shell",
-        "terminal",
-        "break",
-        {
-            "type": "custom",
-            "format": "{#cyan}Hardware"
-        },
-        "cpu",
+        { "type": "custom", "group": "system", "format": "{#cyan}System" },
+        { "type": "os", "group": "system" },
+        { "type": "kernel", "group": "system" },
+        { "type": "uptime", "group": "system" },
+        { "type": "de", "group": "system", "key": "Desktop" },
+        { "type": "wm", "group": "system", "key": "WM" },
+        { "type": "shell", "group": "system" },
+        { "type": "terminal", "group": "system" },
+        { "type": "break", "group": "system" },
+        { "type": "custom", "group": "hardware", "format": "{#cyan}Hardware" },
+        { "type": "cpu", "group": "hardware" },
         {
             "type": "display",
+            "group": "hardware",
             "key": "Display",
             "format": "{width}x{height}, {bit-depth}-bit"
         },
-        "localip",
-        "break",
-        {
-            "type": "custom",
-            "format": "{#cyan}Memory and disks"
-        },
+        { "type": "break", "group": "hardware" },
+        { "type": "custom", "group": "memory-disks", "format": "{#cyan}Memory and disks" },
         {
             "type": "memory",
+            "group": "memory-disks",
             "format": "{percentage-bar} {used} / {total}"
         },
         {
             "type": "disk",
+            "group": "memory-disks",
             "key": "{mountpoint}",
             "format": "{size-percentage-bar} {size-used} / {size-total}"
         },
-        "break",
+        { "type": "break", "group": "memory-disks" },
+        { "type": "custom", "group": "network", "format": "{#cyan}Network" },
+        { "type": "localip", "group": "network" },
+        { "type": "break", "group": "network" },
         "colors"
     ]
 }

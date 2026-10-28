@@ -1,0 +1,170 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 17:10:51 +0100
+Subject: [PATCH] AROS: the picture logo's size computed within the limits
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: a logo larger than the terminal's image limits was made
+smaller by one column and one row per step. --logo-width and
+--logo-height take any value up to 2^32-1, so a large value meant
+billions of steps, and a height derived from a large width did not
+fit in 32 bits. A terminal reporting zero columns or rows divided by
+zero.
+Solution: the size is reduced in one step by the ratio of the limit
+(pixels a side, then bytes), keeping the aspect ratio, in 64-bit
+arithmetic, with at least one cell. Zero columns or rows and cells
+larger than an image may be are refused with a message, and the text
+logo is shown.
+Scope: logo/image/image_aros.c (patch 0014's file). AROS only.
+Upstream-Status: AROS-specific; not for upstream.
+Verification: host test tests/test_port.py ImageScaling
+(test_fit_cells_extremes: 2^32-1 and larger sizes, wide, tall, zero).
+Removal: with patch 0014.
+---
+ src/logo/image/image_aros.c | 103 ++++++++++++++++++++++++++++--------
+ 1 file changed, 81 insertions(+), 22 deletions(-)
+
+diff --git a/src/logo/image/image_aros.c b/src/logo/image/image_aros.c
+index 46a240e..38511b6 100644
+--- a/src/logo/image/image_aros.c
++++ b/src/logo/image/image_aros.c
+@@ -24,6 +24,7 @@
+ #include <datatypes/pictureclass.h>
+ #include <clib/alib_protos.h>
+ #include <limpet/limpet.h>
++#include <math.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -148,6 +149,69 @@ static void scaleInto(const Picture* in, uint8_t* box, uint32_t boxW, uint32_t b
+     }
+ }
+ 
++// The image's size in cells within Limpet's limits (maxSide pixels a
++// side, maxBytes of RGBA): too large a request is scaled down in one
++// step, by the ratio of the limit, keeping its aspect ratio; never below
++// one cell. --logo-width and --logo-height may be anything up to 2^32-1,
++// and a size derived from one of them more, so this must not count down
++// cell by cell.
++static void fitCells(uint64_t c, uint64_t r, uint32_t cellW, uint32_t cellH, uint32_t maxSide, uint64_t maxBytes,
++                     uint32_t* columns, uint32_t* rows) {
++    if (!c) {
++        c = 1;
++    }
++    if (!r) {
++        r = 1;
++    }
++    uint64_t maxColumns = maxSide / cellW, maxRows = maxSide / cellH;
++    if (!maxColumns) {
++        maxColumns = 1;
++    }
++    if (!maxRows) {
++        maxRows = 1;
++    }
++    if (c > maxColumns) {
++        r = (r * maxColumns + c / 2) / c;
++        c = maxColumns;
++    }
++    if (r > maxRows) {
++        c = (c * maxRows + r / 2) / r;
++        r = maxRows;
++    }
++    if (!c) {
++        c = 1;
++    }
++    if (!r) {
++        r = 1;
++    }
++    // Area: by the square root of the ratio, then down to whole cells
++    // that fit (at most one step each after the root).
++    uint64_t maxCells = maxBytes / 4 / ((uint64_t) cellW * cellH);
++    if (!maxCells) {
++        maxCells = 1;
++    }
++    if (c * r > maxCells) {
++        double scale = sqrt((double) maxCells / (double) (c * r));
++        c = (uint64_t) ((double) c * scale);
++        r = (uint64_t) ((double) r * scale);
++        if (!c) {
++            c = 1;
++        }
++        if (!r) {
++            r = 1;
++        }
++        while (c * r > maxCells && (c > 1 || r > 1)) {
++            if (c >= r && c > 1) {
++                --c;
++            } else {
++                --r;
++            }
++        }
++    }
++    *columns = (uint32_t) c;
++    *rows = (uint32_t) r;
++}
++
+ static int writeStdout(void* context, const char* bytes, size_t length) {
+     (void) context;
+     return fwrite(bytes, 1, length, stdout) != length;
+@@ -176,10 +240,16 @@ bool ffLogoPrintImageIfExists(FFLogoType type, bool printError) {
+     if (limpet_query_geometry(Output(), &geometry, nullptr) != LIMPET_OK || !geometry.width || !geometry.height) {
+         return fail(printError, "the terminal does not report its cell size in pixels");
+     }
++    if (!geometry.columns || !geometry.rows) {
++        return fail(printError, "the terminal reports no cells");
++    }
+     uint32_t cellW = geometry.width / geometry.columns, cellH = geometry.height / geometry.rows;
+     if (!cellW || !cellH) {
+         return fail(printError, "the terminal reports an empty cell");
+     }
++    if (cellW > LIMPET_KITTY_MAX_SIDE || cellH > LIMPET_KITTY_MAX_SIDE) {
++        return fail(printError, "the terminal's cells are larger than an image may be");
++    }
+ 
+     Picture picture = {};
+     DataTypesBase = OpenLibrary((CONST_STRPTR) "datatypes.library", 39);
+@@ -195,32 +265,21 @@ bool ffLogoPrintImageIfExists(FFLogoType type, bool printError) {
+ 
+     // Cells: what was asked, else the width with the height from the
+     // picture's aspect ratio (rounded to whole rows).
+-    uint32_t columns = options->width, rows = options->height;
+-    if (!columns && rows) {
+-        columns = (uint32_t) (((uint64_t) rows * cellH * picture.width / picture.height + cellW / 2) / cellW);
++    // 64 bits: a side below 2^32 cells, a cell of at most 2^10 pixels and
++    // a picture side of at most 2^12 stay below 2^54.
++    uint64_t askedColumns = options->width, askedRows = options->height;
++    if (!askedColumns && askedRows) {
++        askedColumns = (askedRows * cellH * picture.width / picture.height + cellW / 2) / cellW;
+     }
+-    if (!columns) {
+-        columns = FF_AROS_LOGO_DEFAULT_COLUMNS;
++    if (!askedColumns) {
++        askedColumns = FF_AROS_LOGO_DEFAULT_COLUMNS;
+     }
+-    if (!rows) {
+-        rows = (uint32_t) (((uint64_t) columns * cellW * picture.height / picture.width + cellH / 2) / cellH);
+-    }
+-    if (!columns || !rows) {
+-        columns = rows = 1;
++    if (!askedRows) {
++        askedRows = (askedColumns * cellW * picture.height / picture.width + cellH / 2) / cellH;
+     }
+     // Limpet's limits: 1024 pixels a side, 4 MiB per image.
+-    while ((uint64_t) columns * cellW > LIMPET_KITTY_MAX_SIDE || (uint64_t) rows * cellH > LIMPET_KITTY_MAX_SIDE ||
+-           (uint64_t) columns * cellW * rows * cellH * 4 > LIMPET_KITTY_MAX_BYTES) {
+-        if (columns > 1) {
+-            --columns;
+-        }
+-        if (rows > 1) {
+-            --rows;
+-        }
+-        if (columns == 1 && rows == 1) {
+-            break;
+-        }
+-    }
++    uint32_t columns, rows;
++    fitCells(askedColumns, askedRows, cellW, cellH, LIMPET_KITTY_MAX_SIDE, LIMPET_KITTY_MAX_BYTES, &columns, &rows);
+ 
+     ffLogoResolveAutoPosition(columns + options->paddingLeft + options->paddingRight);
+     if (options->position == FF_LOGO_POSITION_RIGHT) {

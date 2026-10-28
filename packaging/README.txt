@@ -40,12 +40,24 @@ JSON, contain no escape sequences; there, and in CON:,
 
 Configuration
 -------------
+In Limpet, Settings > Preferences can run Fastfetch whenever a new Shell
+window opens, with the compact view or the picture, and with groups of
+lines left out; no file needs editing for that.
+
+    fastfetch -c aros-compact    the compact view (also what plain
+                                 fastfetch shows without a file of yours)
+    fastfetch -c aros-logo --structure-disabled network:hardware
+                                 leaves groups out: system, hardware,
+                                 memory-disks, network
     fastfetch --gen-config       writes ENVARC:fastfetch/config.jsonc
 
-Fastfetch reads ENVARC:fastfetch/config.jsonc, then ENV:fastfetch/, then
-share/fastfetch/config.jsonc in the drawer it was started from, which is
-the compact view; copy that file to ENVARC:fastfetch/ to change it. The file format is that of Fastfetch on
-other systems: https://github.com/fastfetch-cli/fastfetch/wiki/Configuration
+Fastfetch reads ENV:fastfetch/config.jsonc first (this session's copy),
+then ENVARC:fastfetch/config.jsonc (kept over a restart), then the
+compact view in share/fastfetch/presets. To change the compact view, copy
+share/fastfetch/presets/aros-compact.jsonc to ENVARC:fastfetch/config.jsonc,
+edit it, and copy it to ENV:fastfetch/ to see it at once. The file format
+is that of Fastfetch on other systems:
+https://github.com/fastfetch-cli/fastfetch/wiki/Configuration
 Paths in it are AmigaDOS paths.
 
 Limitations

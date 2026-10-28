@@ -85,9 +85,8 @@ def stage(drawer, target, version, build):
     packaging = ROOT / "packaging"
     for p in sorted((packaging / "presets").iterdir()):
         shutil.copy2(p, drawer / "share" / "fastfetch" / "presets" / p.name)
-    # The compact view: PROGDIR:share is the last configuration directory,
-    # so a config of the user's own in ENVARC: or ENV: takes its place.
-    shutil.copy2(packaging / "fastfetch" / "config.jsonc", drawer / "share" / "fastfetch" / "config.jsonc")
+    # The compact view is the preset aros-compact: fastfetch reads it when
+    # the user has no configuration in ENV: or ENVARC: (patch 0018).
     # The AROS logo for -c aros-logo, with its licence (packaging/logos/README.md).
     (drawer / "share" / "fastfetch" / "logos").mkdir()
     shutil.copy2(packaging / "logos" / "aros.png", drawer / "share" / "fastfetch" / "logos" / "aros.png")

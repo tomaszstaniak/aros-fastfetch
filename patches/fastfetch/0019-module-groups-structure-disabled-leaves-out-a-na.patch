@@ -1,0 +1,911 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 17:12:55 +0100
+Subject: [PATCH] Module groups: --structure-disabled leaves out a named group
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: a configuration that shows its modules in groups, with a
+heading (a custom module) and a break for each, cannot be shortened
+from the command line: --structure-disabled takes module types, and
+leaving out "cpu" and "display" leaves the "Hardware" heading and its
+break behind. A preferences editor that offers "show: system,
+hardware, memory, network" would need its own copy of the preset for
+every combination.
+Solution: a module object may have "group": "<name>".
+--structure-disabled leaves out every module whose group it names, as
+it leaves out a type. The key is accepted by every module (with
+"type" and "condition") and described in the JSON schema and help.
+Scope: common/impl/jsonconfig.c, the four modules that check their
+own keys (break, logo, separator, users), doc/json_schema.json,
+doc/help.json. All platforms; a configuration without "group" is read
+as before.
+Upstream-Status: could be proposed upstream; not submitted.
+Verification: guest runs with the aros-logo and aros-compact presets
+and --structure-disabled hardware:network (see the evidence for
+2.70.0-r3).
+Removal: if upstream adds a way to disable a set of modules.
+---
+ doc/help.json                     |   2 +-
+ doc/json_schema.json              | 232 ++++++++++++++++++++++++++++++
+ src/common/impl/jsonconfig.c      |  16 ++-
+ src/modules/break/break.c         |   2 +-
+ src/modules/logo/logo.c           |   2 +-
+ src/modules/separator/separator.c |   2 +-
+ src/modules/users/users.c         |   2 +-
+ 7 files changed, 252 insertions(+), 6 deletions(-)
+
+diff --git a/doc/help.json b/doc/help.json
+index 1188434..8547310 100644
+--- a/doc/help.json
++++ b/doc/help.json
+@@ -494,7 +494,7 @@
+         {
+             "long": "structure-disabled",
+             "desc": "Disable specific modules in the structure",
+-            "remark": "Must be a colon-separated list of keys",
++            "remark": "Must be a colon-separated list of module types or of the \"group\" names given to modules in the JSON config",
+             "arg": {
+                 "type": "structure"
+             }
+diff --git a/doc/json_schema.json b/doc/json_schema.json
+index a7c6eca..1edf75b 100644
+--- a/doc/json_schema.json
++++ b/doc/json_schema.json
+@@ -156,6 +156,10 @@
+                 "Unknown"
+             ]
+         },
++        "group": {
++            "description": "A name for several modules; --structure-disabled leaves out the modules of a group as it leaves out a module type",
++            "type": "string"
++        },
+         "conditions": {
+             "description": "Show the module only if these conditions are met",
+             "type": "object",
+@@ -1679,6 +1683,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1717,6 +1724,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1749,6 +1759,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1807,6 +1820,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1839,6 +1855,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1871,6 +1890,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1903,6 +1925,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1958,6 +1983,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -1993,6 +2021,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2025,6 +2056,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2057,6 +2091,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2118,6 +2155,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2162,6 +2202,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2199,6 +2242,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2245,6 +2291,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2357,6 +2406,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2430,6 +2482,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2462,6 +2517,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2495,6 +2553,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2527,6 +2588,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2616,6 +2680,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2742,6 +2809,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2789,6 +2859,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2821,6 +2894,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2871,6 +2947,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2903,6 +2982,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2935,6 +3017,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -2979,6 +3064,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3079,6 +3167,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3111,6 +3202,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3143,6 +3237,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3175,6 +3272,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3207,6 +3307,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3248,6 +3351,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3280,6 +3386,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3396,6 +3505,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3443,6 +3555,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3475,6 +3590,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3489,6 +3607,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3524,6 +3645,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3559,6 +3683,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3600,6 +3727,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3632,6 +3762,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3684,6 +3817,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3716,6 +3852,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3766,6 +3905,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3798,6 +3940,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3892,6 +4037,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3941,6 +4089,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -3978,6 +4129,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4010,6 +4164,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4042,6 +4199,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4079,6 +4239,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4127,6 +4290,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4157,6 +4323,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4189,6 +4358,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4243,6 +4415,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4283,6 +4458,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4315,6 +4493,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4347,6 +4528,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4379,6 +4563,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4411,6 +4598,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4443,6 +4633,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4499,6 +4692,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4596,6 +4792,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4628,6 +4827,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4670,6 +4872,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4702,6 +4907,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4734,6 +4942,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4766,6 +4977,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4798,6 +5012,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4845,6 +5062,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4880,6 +5100,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4917,6 +5140,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4949,6 +5175,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             },
+@@ -4984,6 +5213,9 @@
+                                     },
+                                     "condition": {
+                                         "$ref": "#/$defs/conditions"
++                                    },
++                                    "group": {
++                                        "$ref": "#/$defs/group"
+                                     }
+                                 }
+                             }
+diff --git a/src/common/impl/jsonconfig.c b/src/common/impl/jsonconfig.c
+index 6ec8f26..d16d3fa 100644
+--- a/src/common/impl/jsonconfig.c
++++ b/src/common/impl/jsonconfig.c
+@@ -14,7 +14,7 @@
+ #include <inttypes.h>
+ 
+ bool ffJsonConfigParseModuleArgs(yyjson_val* key, yyjson_val* val, FFModuleArgs* moduleArgs) {
+-    if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition")) {
++    if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition") || unsafe_yyjson_equals_str(key, "group")) {
+         return true;
+     }
+ 
+@@ -385,6 +385,20 @@ static const char* printJsonConfig(FFdata* data, bool prepare) {
+                 FF_DEBUG("The module object at index %zu has no \"type\" key, or it is not a string", idx);
+                 return "module object must contain a \"type\" key ( case sensitive )";
+             }
++
++            // A name of the user's choosing for several modules, so that
++            // --structure-disabled can leave out a whole group (its heading
++            // and break included) as it leaves out a module type.
++            yyjson_val* group = yyjson_obj_get(module, "group");
++            if (group) {
++                if (!yyjson_is_str(group)) {
++                    FF_DEBUG("'group' is of JSON type %s", yyjson_get_type_desc(group));
++                    return "Property 'group' must be a string";
++                }
++                if (ffStrbufSeparatedContainIgnCaseS(&data->structureDisabled, unsafe_yyjson_get_str(group), ':')) {
++                    continue;
++                }
++            }
+             if (yyjson_obj_size(module) == 1) { // contains only Property type
+                 module = nullptr;
+             }
+diff --git a/src/modules/break/break.c b/src/modules/break/break.c
+index 6d020d9..be8b40f 100644
+--- a/src/modules/break/break.c
++++ b/src/modules/break/break.c
+@@ -12,7 +12,7 @@ void ffParseBreakJsonObject([[maybe_unused]] FFBreakOptions* options, [[maybe_un
+     yyjson_val *key, *val;
+     size_t idx, max;
+     yyjson_obj_foreach (module, idx, max, key, val) {
+-        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition")) {
++        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition") || unsafe_yyjson_equals_str(key, "group")) {
+             continue;
+         }
+ 
+diff --git a/src/modules/logo/logo.c b/src/modules/logo/logo.c
+index 6bdc8b3..33c5ebe 100644
+--- a/src/modules/logo/logo.c
++++ b/src/modules/logo/logo.c
+@@ -12,7 +12,7 @@ void ffParseLogoJsonObject([[maybe_unused]] FFLogoOptions* options, [[maybe_unus
+     yyjson_val *key, *val;
+     size_t idx, max;
+     yyjson_obj_foreach (module, idx, max, key, val) {
+-        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition")) {
++        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition") || unsafe_yyjson_equals_str(key, "group")) {
+             continue;
+         }
+ 
+diff --git a/src/modules/separator/separator.c b/src/modules/separator/separator.c
+index bbb870c..76731f5 100644
+--- a/src/modules/separator/separator.c
++++ b/src/modules/separator/separator.c
+@@ -75,7 +75,7 @@ void ffParseSeparatorJsonObject(FFSeparatorOptions* options, yyjson_val* module)
+     yyjson_val *key, *val;
+     size_t idx, max;
+     yyjson_obj_foreach (module, idx, max, key, val) {
+-        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition")) {
++        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition") || unsafe_yyjson_equals_str(key, "group")) {
+             continue;
+         }
+ 
+diff --git a/src/modules/users/users.c b/src/modules/users/users.c
+index 2083cde..fac0c32 100644
+--- a/src/modules/users/users.c
++++ b/src/modules/users/users.c
+@@ -103,7 +103,7 @@ void ffParseUsersJsonObject(FFUsersOptions* options, yyjson_val* module) {
+     yyjson_val *key, *val;
+     size_t idx, max;
+     yyjson_obj_foreach (module, idx, max, key, val) {
+-        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition")) {
++        if (unsafe_yyjson_equals_str(key, "type") || unsafe_yyjson_equals_str(key, "condition") || unsafe_yyjson_equals_str(key, "group")) {
+             continue;
+         }
+ 

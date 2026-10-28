@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 17:12:55 +0100
+Subject: [PATCH] AROS: ENV: before ENVARC:, the compact view as the default
+ preset
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the configuration was looked for in ENVARC:, ENV: and then
+PROGDIR:share, in that order, because --gen-config writes into the
+first directory. A file in ENV: (a setting tried for the current
+session, as a preferences editor's Use writes it) was hidden by the
+kept file in ENVARC:, unlike every AROS program's settings. And the
+package's compact view was a second copy of a preset: -c could not
+name it.
+Solution: ENV: first, then ENVARC:. --gen-config without a path
+writes ENVARC:fastfetch/config.jsonc by name, and says when an ENV:
+file will be read first until the next restart. Without a
+configuration of the user's, the package's compact view is read from
+PROGDIR:share/fastfetch/presets/aros-compact.jsonc, the same file -c
+aros-compact names; --list-config-paths lists it after the two
+directories. Existing settings: AROS copies ENVARC: to ENV: at every
+start, so a kept file is read as before; a file only in ENVARC: is
+still found.
+Scope: common/FFPlatform.h, common/impl/FFPlatform_aros.c (patch
+0015's lines), fastfetch.c (config lookup, --gen-config,
+--list-config-paths), under __AROS__.
+Upstream-Status: AROS-specific; not for upstream.
+Verification: guest runs with a file in ENVARC: and a different one in
+ENV: (see the project's evidence for 2.70.0-r3).
+Removal: never; replaces patch 0015's order.
+---
+ src/common/FFPlatform.h           |  9 +++++++++
+ src/common/impl/FFPlatform_aros.c | 19 +++++++++---------
+ src/fastfetch.c                   | 33 +++++++++++++++++++++++++++++++
+ 3 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/src/common/FFPlatform.h b/src/common/FFPlatform.h
+index e6133e6..9e69596 100644
+--- a/src/common/FFPlatform.h
++++ b/src/common/FFPlatform.h
+@@ -14,6 +14,15 @@ typedef struct FFPlatformSysinfo {
+     uint32_t pageSizeShift;
+ } FFPlatformSysinfo;
+ 
++#ifdef __AROS__
++// Configuration on AROS: the session's copy in ENV: is read first, then
++// the kept one in ENVARC:, then the package's compact view (a file under a
++// data directory). --gen-config writes the kept one.
++#define FF_AROS_SESSION_CONFIG "ENV:fastfetch/config.jsonc"
++#define FF_AROS_KEPT_CONFIG "ENVARC:fastfetch/config.jsonc"
++#define FF_AROS_DEFAULT_PRESET "fastfetch/presets/aros-compact.jsonc"
++#endif
++
+ typedef struct FFPlatform {
+     FFstrbuf homeDir;  // Trailing slash included
+     FFstrbuf cacheDir; // Trailing slash included
+diff --git a/src/common/impl/FFPlatform_aros.c b/src/common/impl/FFPlatform_aros.c
+index fb1efa7..1a26d32 100644
+--- a/src/common/impl/FFPlatform_aros.c
++++ b/src/common/impl/FFPlatform_aros.c
+@@ -58,19 +58,20 @@ static void flushStdout(void) {
+ void ffPlatformInitImpl(FFPlatform* platform) {
+     atexit(flushStdout);
+ 
+-    // AROS has no home directory. User settings live in ENVARC: (kept) and
+-    // ENV: (this session's copy, made from ENVARC: at boot); fastfetch's
+-    // own files in the drawer it came in. ENVARC: comes first: --gen-config
+-    // writes into the first directory, and a file only in ENV: would be
+-    // gone after the next boot.
++    // AROS has no home directory. User settings live in ENV: (this
++    // session's copy, made from ENVARC: at boot, and where a preferences
++    // editor's Use writes) and ENVARC: (kept). ENV: is read first, as every
++    // AROS program reads its settings, so a setting tried for this session
++    // is not hidden by the kept one. --gen-config writes ENVARC: by name
++    // (FF_AROS_KEPT_CONFIG), not the first directory. Without either the
++    // package's compact view is read (FF_AROS_DEFAULT_PRESET, a preset in
++    // PROGDIR:share; PROGDIR:fastfetch/ cannot exist, the program itself is
++    // PROGDIR:fastfetch).
+     ffStrbufSetStatic(&platform->homeDir, "ENVARC:");
+     ffStrbufSetStatic(&platform->cacheDir, "T:");
+ 
+-    addDir(&platform->configDirs, "ENVARC:");
+     addDir(&platform->configDirs, "ENV:");
+-    // The package's own settings, beside its presets: PROGDIR:fastfetch/
+-    // cannot exist, the program itself is PROGDIR:fastfetch.
+-    addDir(&platform->configDirs, "PROGDIR:share");
++    addDir(&platform->configDirs, "ENVARC:");
+ 
+     nameOfLock(GetProgramDir(), &platform->exePath);
+     if (platform->exePath.length) {
+diff --git a/src/fastfetch.c b/src/fastfetch.c
+index a15ae10..46f0010 100644
+--- a/src/fastfetch.c
++++ b/src/fastfetch.c
+@@ -368,6 +368,14 @@ static void listConfigPaths(void) {
+         ffStrbufSubstrBefore(folder, length);
+         printf("%s%s\n", folder->chars, exists ? " (*)" : "");
+     }
++#ifdef __AROS__
++    FF_LIST_FOR_EACH (FFstrbuf, folder, instance.state.platform.dataDirs) {
++        uint32_t length = folder->length;
++        ffStrbufAppendS(folder, FF_AROS_DEFAULT_PRESET);
++        printf("%s%s\n", folder->chars, ffPathExists(folder->chars, FF_PATHTYPE_FILE) ? " (*)" : "");
++        ffStrbufSubstrBefore(folder, length);
++    }
++#endif
+ }
+ 
+ [[gnu::cold]]
+@@ -451,6 +459,12 @@ static bool parseJsoncFile(FFdata* data, const char* path, yyjson_read_flag flg)
+ [[gnu::cold]]
+ static void setupGenConfigPath(FFdata* data, const char* filePath) {
+     if (!filePath) {
++#ifdef __AROS__
++        // The kept copy, by name: ENV: is read first but is the session's
++        // copy, gone at the next restart.
++        ffStrbufSetS(&data->genConfigPath, FF_AROS_KEPT_CONFIG);
++        return;
++#endif
+         if (instance.state.platform.configDirs.length == 0) {
+             fprintf(stderr, "Error: No config directory found to generate config file in. Use --gen-config <path> to specify a path\n");
+             exit(477);
+@@ -770,6 +784,19 @@ static void parseConfigFiles(FFdata* data) {
+                 return;
+             }
+         }
++#ifdef __AROS__
++        // Without a configuration of the user's: the package's compact
++        // view, the same file as -c aros-compact.
++        FF_LIST_FOR_EACH (FFstrbuf, dir, instance.state.platform.dataDirs) {
++            uint32_t dirLength = dir->length;
++            ffStrbufAppendS(dir, FF_AROS_DEFAULT_PRESET);
++            bool success = parseJsoncFile(data, dir->chars, YYJSON_READ_ALLOW_COMMENTS | YYJSON_READ_ALLOW_TRAILING_COMMAS);
++            ffStrbufSubstrBefore(dir, dirLength);
++            if (success) {
++                return;
++            }
++        }
++#endif
+     }
+ }
+ 
+@@ -913,6 +940,12 @@ static void writeConfigFile(FFdata* data) {
+                    "* Tip: Use a JSON schema-aware editor for better editing experience\n"
+                    "* Documentation: https://github.com/fastfetch-cli/fastfetch/wiki/Configuration\n",
+                 filename->chars);
++#ifdef __AROS__
++            if (ffStrbufEqualS(filename, FF_AROS_KEPT_CONFIG) && ffPathExists(FF_AROS_SESSION_CONFIG, FF_PATHTYPE_FILE)) {
++                printf("* " FF_AROS_SESSION_CONFIG " is read first until the system restarts; "
++                       "delete it to use the new file now\n");
++            }
++#endif
+         } else {
+             printf("Error: failed to write file in `%s`\n", filename->chars);
+             exit(1);
