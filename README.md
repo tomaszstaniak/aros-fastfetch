@@ -8,6 +8,11 @@ can show the AROS logo as a picture. The data
 comes from AROS itself (exec, dos, graphics, intuition, locale,
 processor.resource, bsdsocket.library); nothing is taken from Linux files.
 
+## Download
+
+[Fastfetch 2.70.0-r3 for AROS](https://github.com/tomaszstaniak/aros-fastfetch/releases/tag/v2.70.0-r3)
+is available for the three targets below.
+
 ## Builds
 
 | Archive target | System |
