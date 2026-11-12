@@ -3,7 +3,8 @@
     "AROS_CC": "/path/to/gcc-13/x86_64-aros-gcc",
     "AROS_LINK_CC": "/path/to/abiv11-gcc-10.5/x86_64-aros-gcc",
     "AROS_SDK": "/path/to/SDK-202609/Development",
-    "AROS_AR": "/path/to/abiv11-gcc-10.5/x86_64-aros-ar"
+    "AROS_AR": "/path/to/abiv11-gcc-10.5/x86_64-aros-ar",
+    "AROS_INCLUDE_AFTER": "/path/to/abiv11-build/bin/pc-x86_64/gen/include"
   },
   "aros-x86_64-abiv1-pc": {
     "AROS_CC": "/path/to/gcc-13/x86_64-aros-gcc",

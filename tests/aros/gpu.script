@@ -1,0 +1,76 @@
+.KEY BIN/A,OUT/A,DIR/A,PROBE
+.BRA {
+.KET }
+; Guest checks of the GPU module (2.70.0-r4):
+;   Execute gpu.script BIN=<drawer>/fastfetch OUT=RESULTS:<run directory> DIR=<drawer with gpu-temp.jsonc, gpu-format.jsonc> [PROBE=<drawer>/gpuprobe]
+; Module options are set in configuration files: Fastfetch 2.70 takes none
+; on the command line.
+; Text, JSON and the module's own format, with the temperature off and on,
+; errors shown, the other modules with it, repeated runs with memory before
+; and after, and the system's own answers from gpuprobe (tests/aros/gpuprobe.c).
+; Read-only: nothing is written outside OUT.
+FailAt 21
+MakeDir {OUT}
+Version hiddclass.hidd FULL >{OUT}/gpu-version-hiddclass.txt
+Version telemetry.hidd FULL >{OUT}/gpu-version-telemetry.txt
+Version pci.hidd FULL >{OUT}/gpu-version-pci.txt
+List DEVS:pci.ids LFORMAT "%n %l" >{OUT}/gpu-pciids.txt
+If NOT "{PROBE}" EQ ""
+  {PROBE} >{OUT}/gpu-probe.txt
+  Echo $RC >{OUT}/gpu-probe.rc
+EndIf
+{BIN} --pipe --logo none -s GPU >{OUT}/gpu-text.txt
+Echo $RC >{OUT}/gpu-text.rc
+{BIN} --pipe --logo none --show-errors true -s GPU >{OUT}/gpu-errors.txt
+Echo $RC >{OUT}/gpu-errors.rc
+{BIN} --pipe --show-errors true -c {DIR}/gpu-temp.jsonc >{OUT}/gpu-temp.txt
+Echo $RC >{OUT}/gpu-temp.rc
+{BIN} -s GPU --format json >{OUT}/gpu.json
+Echo $RC >{OUT}/gpu-json.rc
+{BIN} -c {DIR}/gpu-temp.jsonc --format json >{OUT}/gpu-temp.json
+Echo $RC >{OUT}/gpu-temp-json.rc
+{BIN} --pipe --show-errors true -c {DIR}/gpu-format.jsonc >{OUT}/gpu-format.txt
+Echo $RC >{OUT}/gpu-format.rc
+; The other modules beside it, and the presets without it
+{BIN} --pipe --logo none --show-errors true -s Title:OS:Kernel:Uptime:Display:CPU:GPU:Memory:Disk:Locale >{OUT}/gpu-with-others.txt
+Echo $RC >{OUT}/gpu-with-others.rc
+{BIN} --pipe >{OUT}/gpu-default.txt
+Echo $RC >{OUT}/gpu-default.rc
+{BIN} -c aros-logo --pipe >{OUT}/gpu-logo-preset.txt
+Echo $RC >{OUT}/gpu-logo-preset.rc
+; Repeated runs, temperature on: memory before and after, no process left
+Avail FLUSH >{OUT}/gpu-avail-before.txt
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-01.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-02.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-03.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-04.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-05.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-06.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-07.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-08.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-09.rc
+{BIN} --pipe -c {DIR}/gpu-temp.jsonc >NIL:
+Echo $RC >{OUT}/gpu-repeat-10.rc
+; Repeating rounds (--dynamic-interval), ended with Ctrl-C (Break C)
+Run >NIL: {BIN} --pipe -c {DIR}/gpu-temp.jsonc --dynamic-interval 300 >{OUT}/gpu-dynamic.txt
+Wait 3
+Status COMMAND={BIN} >{OUT}/gpu-dynamic-task.txt
+; (a backquoted Status gave Break no number on mainline 20261110)
+Status COMMAND={BIN} >ENV:ffgputask
+Break $ffgputask C
+Delete ENV:ffgputask QUIET
+Wait 2
+Status COMMAND={BIN} >{OUT}/gpu-dynamic-task-after.txt
+Avail FLUSH >{OUT}/gpu-avail-after.txt
+Status >{OUT}/gpu-status.txt
+Echo "done" >{OUT}/gpu-done.txt
+Echo "gpu done"

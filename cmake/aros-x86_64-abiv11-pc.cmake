@@ -7,4 +7,4 @@ include("${CMAKE_CURRENT_LIST_DIR}/aros-common.cmake")
 # used here for C23 does not, and reused r12 between the asm that loads the
 # base and the call: OpenDevice ran with a wrong base and crashed
 # ("Privilege violation", pool v11-1, 2026-10-27).
-set(CMAKE_C_FLAGS_INIT "-ffixed-r12")
+set(CMAKE_C_FLAGS_INIT "${AROS_C_FLAGS_INIT} -ffixed-r12")

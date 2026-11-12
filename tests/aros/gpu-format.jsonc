@@ -1,0 +1,11 @@
+// tests/aros/gpu.script: every field of the GPU module, temperature on
+{
+  "logo": { "type": "none" },
+  "modules": [
+    {
+      "type": "gpu",
+      "temp": true,
+      "format": "name={name}|vendor={vendor}|driver={driver}|type={type}|dtotal={dedicated-total}|dused={dedicated-used}|stotal={shared-total}|sused={shared-used}|temp={temperature}|api={platform-api}|cores={core-count}|freq={frequency}"
+    }
+  ]
+}

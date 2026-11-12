@@ -1,0 +1,649 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Thu, 12 Nov 2026 02:40:38 +0100
+Subject: [PATCH] AROS: the GPU module from pci.hidd and HIDD relations
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the GPU module said "Not supported on AROS". AROS enumerates
+display controllers in pci.hidd and installs pci.ids in DEVS:; since
+hiddclass 1.3 (AROS mainline, 2026-11) a display driver declares the PCI
+device it runs, and nvgfx's sensors declare the device they measure.
+Solution: list the PCI display functions (class 0x03, without auxiliary
+functions) as GPUs, named by the upstream pci.ids code reading
+DEVS:pci.ids (memmem provided for it). With relations: the driver's name,
+VRAM and GART from drivers that measure them (nvgfx; amdgpu and
+vmwaresvga answer the framebuffer size), and with the temp option the
+current reading of a thermal zone or a "Temperature" telemetry entry
+that monitors the device, in its unit. Relation, telemetry and device
+path numbers are stated for older SDKs and checked against newer
+headers; on an older hiddclass none of those methods is called.
+Firmware framebuffers and the software rasterizer name no GPU.
+Scope: detection/gpu (gpu_aros.c, gpu_aros_values.c, gpu.h for
+FF_GPU_HAS_PCI_IDS), common/aros/aros_memmem, CMakeLists.txt; AROS only.
+Upstream-Status: AROS-specific.
+Verification: host tests GpuValues and Memmem; guest runs in the port's
+records (tests/aros/gpu.script, tests/aros/gpuprobe.c).
+Removal: with upstream AROS support.
+---
+ CMakeLists.txt                      |   8 +
+ src/common/aros/aros_memmem.c       |  25 ++
+ src/common/aros/aros_memmem.h       |   8 +
+ src/detection/gpu/gpu.h             |   2 +-
+ src/detection/gpu/gpu_aros.c        | 356 +++++++++++++++++++++++++++-
+ src/detection/gpu/gpu_aros_values.c |  81 +++++++
+ src/detection/gpu/gpu_aros_values.h |  60 +++++
+ 7 files changed, 535 insertions(+), 5 deletions(-)
+ create mode 100644 src/common/aros/aros_memmem.c
+ create mode 100644 src/common/aros/aros_memmem.h
+ create mode 100644 src/detection/gpu/gpu_aros_values.c
+ create mode 100644 src/detection/gpu/gpu_aros_values.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 667a48e..e0dfc55 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1405,6 +1405,7 @@ elseif(AROS)
+         src/common/aros/aros_sleep.c
+         src/common/aros/aros_charset.c
+         src/common/aros/genconfig_aros.c
++        src/common/aros/aros_memmem.c
+         src/detection/battery/battery_nosupport.c
+         src/detection/bios/bios_nosupport.c
+         src/detection/board/board_nosupport.c
+@@ -1427,6 +1428,8 @@ elseif(AROS)
+         src/detection/displayserver/displayserver_aros.c
+         src/detection/font/font_aros.c
+         src/detection/gpu/gpu_aros.c
++        src/detection/gpu/gpu_aros_values.c
++        src/detection/gpu/gpu_pci.c
+         src/detection/gtk_qt/gtk.c
+         src/detection/host/host_nosupport.c
+         src/detection/icons/icons_nosupport.c
+@@ -1774,6 +1777,11 @@ elseif(AROS)
+         target_compile_options(libfastfetch PUBLIC
+             "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/src/common/aros/aros_compat_abiv11.h")
+     endif()
++    # GPU names from the pci.ids AROS installs (rom/hidds/pci); the upstream
++    # parser uses memmem, which the AROS C libraries lack.
++    target_compile_definitions(libfastfetch PUBLIC FF_CUSTOM_PCI_IDS_PATH=DEVS:pci.ids)
++    set_source_files_properties(src/detection/gpu/gpu_pci.c PROPERTIES COMPILE_OPTIONS
++        "-include;${CMAKE_CURRENT_SOURCE_DIR}/src/common/aros/aros_memmem.h")
+ elseif(GNU)
+     # On Hurd PATH_MAX is not defined. Set an arbitrary limit as workaround.
+     target_compile_definitions(libfastfetch PUBLIC _GNU_SOURCE PATH_MAX=4096 O_PATH=O_NORW)
+diff --git a/src/common/aros/aros_memmem.c b/src/common/aros/aros_memmem.c
+new file mode 100644
+index 0000000..af6dffd
+--- /dev/null
++++ b/src/common/aros/aros_memmem.c
+@@ -0,0 +1,25 @@
++#include "aros_memmem.h"
++
++#include <string.h>
++
++void* memmem(const void* haystack, size_t haystackLength, const void* needle, size_t needleLength) {
++    if (needleLength == 0) {
++        return (void*) haystack;
++    }
++    if (haystackLength < needleLength) {
++        return NULL;
++    }
++    const unsigned char* h = haystack;
++    const unsigned char* last = h + (haystackLength - needleLength);
++    const unsigned char first = *(const unsigned char*) needle;
++    for (; h <= last; h++) {
++        h = memchr(h, first, (size_t) (last - h) + 1);
++        if (!h) {
++            return NULL;
++        }
++        if (memcmp(h, needle, needleLength) == 0) {
++            return (void*) h;
++        }
++    }
++    return NULL;
++}
+diff --git a/src/common/aros/aros_memmem.h b/src/common/aros/aros_memmem.h
+new file mode 100644
+index 0000000..b4598b7
+--- /dev/null
++++ b/src/common/aros/aros_memmem.h
+@@ -0,0 +1,8 @@
++#pragma once
++
++// memmem, a GNU and BSD extension the AROS C libraries do not have. Given
++// to the files that need it (src/detection/gpu/gpu_pci.c) with -include.
++
++#include <stddef.h>
++
++void* memmem(const void* haystack, size_t haystackLength, const void* needle, size_t needleLength);
+diff --git a/src/detection/gpu/gpu.h b/src/detection/gpu/gpu.h
+index 584a18b..deab4ee 100644
+--- a/src/detection/gpu/gpu.h
++++ b/src/detection/gpu/gpu.h
+@@ -79,7 +79,7 @@ typedef struct FFGpuDriverPciBusId {
+     uint32_t func;
+ } FFGpuDriverPciBusId;
+ 
+-#if defined(__linux__) || defined(__FreeBSD__) || defined(__sun) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__HAIKU__) || defined(__GNU__)
++#if defined(__linux__) || defined(__FreeBSD__) || defined(__sun) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__HAIKU__) || defined(__GNU__) || defined(__AROS__)
+ #define FF_GPU_HAS_PCI_IDS 1
+ void ffGPUParsePciIdsFile(const FFstrbuf* content, uint8_t subclass, uint16_t vendor, uint16_t device, FFGPUResult* gpu);
+ void ffGPUFillVendorAndName(uint8_t subclass, uint16_t vendor, uint16_t device, FFGPUResult* gpu);
+diff --git a/src/detection/gpu/gpu_aros.c b/src/detection/gpu/gpu_aros.c
+index 23bfd4b..6c49ee9 100644
+--- a/src/detection/gpu/gpu_aros.c
++++ b/src/detection/gpu/gpu_aros.c
+@@ -1,7 +1,355 @@
+ #include "gpu.h"
++#include "gpu_aros_values.h"
++#include "common/debug.h"
+ 
+-// AROS graphics drivers do not say which GPU they drive; the Display
+-// module shows the driver's mode name ("VESA: ...", "VideoCore: ...").
+-const char* ffDetectGPUImpl([[maybe_unused]] const FFGPUOptions* options, [[maybe_unused]] FFlist* gpus) {
+-    return "Not supported on AROS";
++#include <float.h>
++#include <string.h>
++
++// Method and attribute bases are obtained here, in this module only; the
++// SDK headers would otherwise declare program-wide ones.
++#define __OOP_NOATTRBASES__
++#define __OOP_NOMETHODBASES__
++
++#include <exec/execbase.h>
++#include <aros/asmcall.h>
++#include <utility/hooks.h>
++#include <utility/tagitem.h>
++#include <oop/oop.h>
++#include <hidd/hidd.h>
++#include <hidd/pci.h>
++#include <hidd/gfx.h>
++#include <proto/exec.h>
++#include <proto/oop.h>
++
++static_assert(FF_AROS_GPU_MEM_UNKNOWN == FF_GPU_VMEM_SIZE_UNSET, "unknown memory values differ");
++static_assert(FF_AROS_GPU_TEMP_UNKNOWN == FF_GPU_TEMP_UNSET, "unknown temperature values differ");
++
++// The GPUs are the display controllers pci.hidd enumerates (class 0x03),
++// named from DEVS:pci.ids as on the other PCI platforms. What a display
++// driver knows about its card comes through HIDD object relations
++// (hiddclass 1.3, AROS mainline 2026-11): the driver declares the PCI device
++// it runs, and a sensor declares the device its readings are about. Without
++// relations, a driver is never matched to a device by guessing.
++//
++// AROS graphics drivers with no PCI device (a firmware framebuffer such as
++// VESA, EFI or the Raspberry Pi's VideoCore framebuffer, the headless
++// driver, the software rasterizer) do not name a GPU and are not listed.
++//
++// Relations, the telemetry interfaces and aoHidd_DevicePath are newer than
++// some SDKs this port is built with, so their numbers are given here; they
++// are fixed by the interface definitions (rom/hidds/hidd/hiddclass.conf,
++// rom/hidds/base/telemetry/telemetry.conf).
++
++#define FF_HIDD_DEVICE_PATH 12u // aoHidd_DevicePath
++#define FF_HIDD_FIND_RELATED 3u // moHidd_FindRelated
++#define FF_HIDD_RELATION_DRIVER 2u // vHidd_Relation_Driver
++#define FF_HIDD_RELATION_MONITORED_BY (7u | 0x80000000u) // vHidd_Relation_MonitoredBy
++
++#define FF_IID_TELEMETRY "hidd.telemetry"
++#define FF_TELEMETRY_ENTRY_COUNT 0u // aoHidd_Telemetry_EntryCount
++#define FF_TELEMETRY_GET_ENTRY_ATTRIBS 0u // moHidd_Telemetry_GetEntryAttribs
++#define FF_TELEMETRY_ENTRY_ID (TAG_USER + 0x1000)
++#define FF_TELEMETRY_ENTRY_UNITS (TAG_USER + 0x1001)
++#define FF_TELEMETRY_ENTRY_VALUE (TAG_USER + 0x1004)
++
++#define FF_IID_THERMAL "hidd.telemetry.thermal"
++#define FF_THERMAL_GET_TEMPERATURE 0u // moHidd_Thermal_GetTemperature
++#define FF_THERMAL_CURRENT 0u // vHidd_Thermal_Current, the sensor's reading
++
++#ifdef vHidd_Relation_MonitoredBy
++static_assert(vHidd_Relation_Driver == FF_HIDD_RELATION_DRIVER, "vHidd_Relation_Driver");
++static_assert(vHidd_Relation_MonitoredBy == FF_HIDD_RELATION_MONITORED_BY, "vHidd_Relation_MonitoredBy");
++#endif
++#ifdef HIDD_FindRelated
++static_assert(moHidd_FindRelated == FF_HIDD_FIND_RELATED, "moHidd_FindRelated");
++static_assert(aoHidd_DevicePath == FF_HIDD_DEVICE_PATH, "aoHidd_DevicePath");
++#endif
++
++struct FFpHiddFindRelated {
++    OOP_MethodID mID;
++    ULONG type;
++    CONST_STRPTR classID;
++};
++
++struct FFpThermalGetTemperature {
++    OOP_MethodID mID;
++    ULONG point;
++    LONG* temperature;
++};
++
++struct FFpTelemetryGetEntryAttribs {
++    OOP_MethodID mID;
++    ULONG index;
++    struct TagItem* tags;
++};
++
++#define FF_AROS_GPU_MAX 16
++
++typedef struct PciScan {
++    struct Library* oopBase;
++    OOP_AttrBase pciDeviceAB;
++    OOP_AttrBase hiddAB;
++    bool relations;
++    uint32_t count;
++    FFArosGpuPciEntry entries[FF_AROS_GPU_MAX];
++} PciScan;
++
++// Relations exist from hiddclass 1.3 on. On an older hiddclass the method
++// numbers after its last method belong to no method, so they are not used.
++static bool haveRelations(void) {
++    bool result = false;
++    Forbid();
++    struct Library* lib = (struct Library*) FindName(&SysBase->LibList, (CONST_STRPTR) "hiddclass.hidd");
++    if (lib) {
++        result = lib->lib_Version > 1 || (lib->lib_Version == 1 && lib->lib_Revision >= 3);
++    }
++    Permit();
++    FF_DEBUG("hiddclass.hidd %s, relations %s", lib ? "found" : "not found", result ? "available" : "not available");
++    return result;
++}
++
++// Called by pci.hidd with its device list locked: only attributes are read
++// here. The device objects stay valid afterwards, as long as their PCI bus
++// driver is installed (pci.hidd keeps them until RemHardwareDriver).
++static AROS_UFH3(void, pciEnumHook, AROS_UFHA(struct Hook*, hook, A0), AROS_UFHA(OOP_Object*, device, A2), AROS_UFHA(APTR, message, A1)) {
++    AROS_USERFUNC_INIT
++    (void) message;
++
++    PciScan* scan = (PciScan*) hook->h_Data;
++    struct Library* OOPBase = scan->oopBase;
++    if (scan->count >= FF_AROS_GPU_MAX) {
++        return;
++    }
++
++    IPTR bus = 0, dev = 0, sub = 0, vendor = 0, product = 0, subclass = 0, revision = 0;
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_Bus, &bus);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_Dev, &dev);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_Sub, &sub);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_VendorID, &vendor);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_ProductID, &product);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_SubClass, &subclass);
++    OOP_GetAttr(device, scan->pciDeviceAB + aoHidd_PCIDevice_RevisionID, &revision);
++
++    FFArosGpuPciEntry* e = &scan->entries[scan->count++];
++    *e = (FFArosGpuPciEntry) {
++        .object = device,
++        .domain = 0,
++        .bus = (uint32_t) bus,
++        .device = (uint32_t) dev,
++        .function = (uint32_t) sub,
++        .vendorId = (uint16_t) vendor,
++        .deviceId = (uint16_t) product,
++        .subclass = (uint8_t) subclass,
++        .revision = (uint8_t) revision,
++    };
++
++    if (scan->relations) {
++        // The segment is only in the device path
++        IPTR path = 0;
++        uint32_t domain, b, d, f;
++        OOP_GetAttr(device, scan->hiddAB + FF_HIDD_DEVICE_PATH, &path);
++        if (ffArosGpuParsePciPath((const char*) path, &domain, &b, &d, &f)) {
++            e->domain = domain;
++        }
++    }
++
++    AROS_USERFUNC_EXIT
++}
++
++static OOP_Object* findRelated(struct Library* OOPBase, OOP_Object* object, ULONG type, const char* classId) {
++    struct FFpHiddFindRelated msg = {
++        .mID = OOP_GetMethodID((CONST_STRPTR) IID_Hidd, FF_HIDD_FIND_RELATED),
++        .type = type,
++        .classID = (CONST_STRPTR) classId,
++    };
++    return (OOP_Object*) OOP_DoMethod(object, &msg.mID);
++}
++
++static void detectMemory(struct Library* OOPBase, OOP_Object* driver, FFGPUResult* gpu) {
++    const char* chain[8];
++    uint32_t count = 0;
++    for (OOP_Class* cl = OOP_OCLASS(driver); cl && count < ARRAY_SIZE(chain); cl = cl->superclass) {
++        chain[count++] = (const char*) cl->ClassNode.ln_Name;
++    }
++    if (!ffArosGpuDriverReportsMemory(chain, count)) {
++        FF_DEBUG("%s: its memory figures are not measured ones", count && chain[0] ? chain[0] : "driver");
++        return;
++    }
++
++    OOP_AttrBase gfxAB = OOP_ObtainAttrBase((CONST_STRPTR) IID_Hidd_Gfx);
++    if (!gfxAB) {
++        return;
++    }
++    // A value the driver does not fill in stays at ~0
++    struct TagItem tags[] = {
++        { tHidd_Gfx_MemTotal, ~(IPTR) 0 },
++        { tHidd_Gfx_MemFree, ~(IPTR) 0 },
++        { tHidd_Gfx_MemAddressableTotal, ~(IPTR) 0 },
++        { tHidd_Gfx_MemAddressableFree, ~(IPTR) 0 },
++        { TAG_DONE, 0 },
++    };
++    OOP_GetAttr(driver, gfxAB + aoHidd_Gfx_MemoryAttribs, (IPTR*) tags);
++    OOP_ReleaseAttrBase((CONST_STRPTR) IID_Hidd_Gfx);
++
++    // Video memory is the card's own; the addressable part is the GART,
++    // system memory the card maps, which Fastfetch shows as shared.
++    FFArosGpuMemory dedicated = ffArosGpuMemory(tags[0].ti_Data != ~(IPTR) 0, tags[0].ti_Data,
++        tags[1].ti_Data != ~(IPTR) 0, tags[1].ti_Data);
++    FFArosGpuMemory shared = ffArosGpuMemory(tags[2].ti_Data != ~(IPTR) 0, tags[2].ti_Data,
++        tags[3].ti_Data != ~(IPTR) 0, tags[3].ti_Data);
++    gpu->dedicated.total = dedicated.total;
++    gpu->dedicated.used = dedicated.used;
++    gpu->shared.total = shared.total;
++    gpu->shared.used = shared.used;
++}
++
++// The current reading of a sensor that monitors the PCI device: a thermal
++// zone's own temperature, otherwise a telemetry entry named "Temperature".
++// Trip points (passive, critical, ...) are never taken for the reading.
++static double detectTemperature(struct Library* OOPBase, OOP_Object* pciDevice) {
++    OOP_Object* zone = findRelated(OOPBase, pciDevice, FF_HIDD_RELATION_MONITORED_BY, FF_IID_THERMAL);
++    if (zone) {
++        LONG value = 0;
++        struct FFpThermalGetTemperature msg = {
++            .mID = OOP_GetMethodID((CONST_STRPTR) FF_IID_THERMAL, FF_THERMAL_GET_TEMPERATURE),
++            .point = FF_THERMAL_CURRENT,
++            .temperature = &value,
++        };
++        if ((BOOL) OOP_DoMethod(zone, &msg.mID)) {
++            return ffArosGpuTemperature(FF_AROS_TELEMETRY_UNIT_MILLICELSIUS, (int32_t) value);
++        }
++        FF_DEBUG("the thermal zone did not answer its reading");
++        return FF_GPU_TEMP_UNSET;
++    }
++
++    OOP_Object* sensor = findRelated(OOPBase, pciDevice, FF_HIDD_RELATION_MONITORED_BY, FF_IID_TELEMETRY);
++    if (!sensor) {
++        return FF_GPU_TEMP_UNSET;
++    }
++    OOP_AttrBase telemetryAB = OOP_ObtainAttrBase((CONST_STRPTR) FF_IID_TELEMETRY);
++    if (!telemetryAB) {
++        return FF_GPU_TEMP_UNSET;
++    }
++    IPTR entries = 0;
++    OOP_GetAttr(sensor, telemetryAB + FF_TELEMETRY_ENTRY_COUNT, &entries);
++    OOP_ReleaseAttrBase((CONST_STRPTR) FF_IID_TELEMETRY);
++
++    OOP_MethodID getEntry = OOP_GetMethodID((CONST_STRPTR) FF_IID_TELEMETRY, FF_TELEMETRY_GET_ENTRY_ATTRIBS);
++    for (ULONG i = 0; i < entries && i < 64; i++) {
++        // Drivers store 32-bit units and values as well as full IPTRs; the
++        // storage is cleared so that either reads back the same.
++        IPTR id = 0, units = 0, value = 0;
++        struct TagItem tags[] = {
++            { FF_TELEMETRY_ENTRY_ID, (IPTR) &id },
++            { FF_TELEMETRY_ENTRY_UNITS, (IPTR) &units },
++            { FF_TELEMETRY_ENTRY_VALUE, (IPTR) &value },
++            { TAG_DONE, 0 },
++        };
++        struct FFpTelemetryGetEntryAttribs msg = { .mID = getEntry, .index = i, .tags = tags };
++        if (!(BOOL) OOP_DoMethod(sensor, &msg.mID) || !id || strcmp((const char*) id, "Temperature") != 0) {
++            continue;
++        }
++        double celsius = ffArosGpuTemperature((uint32_t) units, (int32_t) (LONG) value);
++        if (celsius != FF_GPU_TEMP_UNSET) {
++            return celsius;
++        }
++    }
++    return FF_GPU_TEMP_UNSET;
++}
++
++const char* ffDetectGPUImpl(const FFGPUOptions* options, FFlist* gpus) {
++    struct Library* OOPBase = OpenLibrary((CONST_STRPTR) "oop.library", 0);
++    if (!OOPBase) {
++        return "oop.library is not available";
++    }
++
++    const char* error = nullptr;
++    PciScan scan = { .oopBase = OOPBase, .relations = haveRelations() };
++    scan.pciDeviceAB = OOP_ObtainAttrBase((CONST_STRPTR) IID_Hidd_PCIDevice);
++    scan.hiddAB = OOP_ObtainAttrBase((CONST_STRPTR) IID_Hidd);
++
++    // The PCI subsystem object is a singleton owned by pci.hidd; asking for
++    // it does not load the driver, and it is not disposed.
++    OOP_Object* pci = scan.pciDeviceAB && scan.hiddAB ? OOP_NewObject(NULL, (CONST_STRPTR) CLID_Hidd_PCI, NULL) : NULL;
++    if (!pci) {
++        error = "pci.hidd is not available";
++        goto exit;
++    }
++
++    struct Hook hook = { .h_Entry = (HOOKFUNC) (APTR) AROS_ASMSYMNAME(pciEnumHook), .h_Data = &scan };
++    struct TagItem requirements[] = {
++        { tHidd_PCI_Class, 0x03 }, // display controller
++        { TAG_DONE, 0 },
++    };
++    struct pHidd_PCI_EnumDevices enumMsg = {
++        .mID = OOP_GetMethodID((CONST_STRPTR) IID_Hidd_PCI, moHidd_PCI_EnumDevices),
++        .callback = &hook,
++        .requirements = requirements,
++    };
++    OOP_DoMethod(pci, &enumMsg.mID);
++
++    uint32_t count = ffArosGpuSelectPci(scan.entries, scan.count);
++    FF_DEBUG("pci.hidd: %u display function(s), %u GPU(s)", scan.count, count);
++    if (count == 0) {
++        error = "No PCI display controller found";
++        goto exit;
++    }
++
++    for (uint32_t i = 0; i < count; i++) {
++        const FFArosGpuPciEntry* e = &scan.entries[i];
++        FFGPUResult* gpu = FF_LIST_ADD(FFGPUResult, *gpus);
++        ffStrbufInitStatic(&gpu->vendor, ffGPUGetVendorString(e->vendorId));
++        ffStrbufInit(&gpu->name);
++        ffStrbufInit(&gpu->driver);
++        ffStrbufInitStatic(&gpu->platformApi, "pci.hidd");
++        ffStrbufInit(&gpu->memoryType);
++        gpu->index = FF_GPU_INDEX_UNSET;
++        gpu->temperature = FF_GPU_TEMP_UNSET;
++        gpu->coreCount = FF_GPU_CORE_COUNT_UNSET;
++        gpu->coreUsage = FF_GPU_CORE_USAGE_UNSET;
++        gpu->type = FF_GPU_TYPE_UNKNOWN;
++        gpu->dedicated.total = gpu->dedicated.used = gpu->shared.total = gpu->shared.used = FF_GPU_VMEM_SIZE_UNSET;
++        gpu->deviceId = ffGPUPciAddr2Id(e->domain, e->bus, e->device, e->function);
++        gpu->frequency = FF_GPU_FREQUENCY_UNSET;
++        gpu->pcieSpeed = FF_GPU_PCIE_SPEED_UNSET;
++
++        if (gpu->vendor.chars == FF_GPU_VENDOR_NAME_AMD) {
++            ffGPUQueryAmdGpuName(e->deviceId, e->revision, gpu);
++        }
++        if (gpu->name.length == 0) {
++            ffGPUFillVendorAndName(e->subclass, e->vendorId, e->deviceId, gpu);
++        }
++        ffGPUDetectTypeByVendorAndName(gpu);
++
++        if (!scan.relations) {
++            continue;
++        }
++
++        OOP_Object* device = (OOP_Object*) e->object;
++        OOP_Object* driver = findRelated(OOPBase, device, FF_HIDD_RELATION_DRIVER, IID_Hidd_Gfx);
++        if (driver) {
++            IPTR name = 0;
++            OOP_GetAttr(driver, scan.hiddAB + aoHidd_Name, &name);
++            if (name) {
++                ffStrbufSetS(&gpu->driver, (const char*) name);
++            }
++            detectMemory(OOPBase, driver, gpu);
++        } else {
++            FF_DEBUG("%04x:%04x: no display driver declares this device", e->vendorId, e->deviceId);
++        }
++
++        if (options->temp) {
++            gpu->temperature = detectTemperature(OOPBase, device);
++        }
++    }
++
++exit:
++    if (scan.hiddAB) {
++        OOP_ReleaseAttrBase((CONST_STRPTR) IID_Hidd);
++    }
++    if (scan.pciDeviceAB) {
++        OOP_ReleaseAttrBase((CONST_STRPTR) IID_Hidd_PCIDevice);
++    }
++    CloseLibrary(OOPBase);
++    return error;
+ }
+diff --git a/src/detection/gpu/gpu_aros_values.c b/src/detection/gpu/gpu_aros_values.c
+new file mode 100644
+index 0000000..1ef79b5
+--- /dev/null
++++ b/src/detection/gpu/gpu_aros_values.c
+@@ -0,0 +1,81 @@
++#include "gpu_aros_values.h"
++
++#include <stdio.h>
++#include <string.h>
++
++double ffArosGpuTemperature(uint32_t unit, int32_t value) {
++    switch (unit) {
++        case FF_AROS_TELEMETRY_UNIT_CELSIUS:
++            return (double) value;
++        case FF_AROS_TELEMETRY_UNIT_MILLICELSIUS:
++            return (double) value / 1000.0;
++        default:
++            return FF_AROS_GPU_TEMP_UNKNOWN;
++    }
++}
++
++FFArosGpuMemory ffArosGpuMemory(bool haveTotal, uint64_t total, bool haveFree, uint64_t free) {
++    FFArosGpuMemory result = { FF_AROS_GPU_MEM_UNKNOWN, FF_AROS_GPU_MEM_UNKNOWN };
++    if (!haveTotal || total == 0 || total == FF_AROS_GPU_MEM_UNKNOWN) {
++        return result;
++    }
++    result.total = total;
++    if (haveFree && free <= total) {
++        result.used = total - free;
++    }
++    return result;
++}
++
++bool ffArosGpuParsePciPath(const char* path, uint32_t* domain, uint32_t* bus, uint32_t* device, uint32_t* function) {
++    if (!path || strncmp(path, "pci/", 4) != 0) {
++        return false;
++    }
++    unsigned s, b, d, f;
++    int end = 0;
++    if (sscanf(path + 4, "%x:%x:%x.%x%n", &s, &b, &d, &f, &end) != 4 || path[4 + end] != '\0') {
++        return false;
++    }
++    if (s > 0xffff || b > 0xff || d > 0x1f || f > 0x7) {
++        return false;
++    }
++    *domain = s;
++    *bus = b;
++    *device = d;
++    *function = f;
++    return true;
++}
++
++bool ffArosGpuIsAuxiliaryFunction(uint32_t function, uint8_t subclass) {
++    return function > 0 && subclass == 0x80;
++}
++
++bool ffArosGpuDriverReportsMemory(const char* const* classChain, uint32_t count) {
++    for (uint32_t i = 0; i < count; i++) {
++        // nvgfx asks nouveau for the VRAM and GART sizes and their free parts
++        if (classChain[i] && strcmp(classChain[i], "hidd.gfx.nvgfx") == 0) {
++            return true;
++        }
++    }
++    return false;
++}
++
++uint32_t ffArosGpuSelectPci(FFArosGpuPciEntry* entries, uint32_t count) {
++    uint32_t kept = 0;
++    for (uint32_t i = 0; i < count; i++) {
++        const FFArosGpuPciEntry* e = &entries[i];
++        if (ffArosGpuIsAuxiliaryFunction(e->function, e->subclass)) {
++            continue;
++        }
++        bool seen = false;
++        for (uint32_t j = 0; j < kept; j++) {
++            if (entries[j].object == e->object) {
++                seen = true;
++                break;
++            }
++        }
++        if (!seen) {
++            entries[kept++] = *e;
++        }
++    }
++    return kept;
++}
+diff --git a/src/detection/gpu/gpu_aros_values.h b/src/detection/gpu/gpu_aros_values.h
+new file mode 100644
+index 0000000..2bd4d1a
+--- /dev/null
++++ b/src/detection/gpu/gpu_aros_values.h
+@@ -0,0 +1,60 @@
++#pragma once
++
++// The parts of the AROS GPU backend that do not call the system: turning
++// what pci.hidd, the display driver and the telemetry classes answer into
++// the values of a GPU result. Kept free of AROS headers so that the host
++// tests can check them.
++
++#include <stdbool.h>
++#include <stdint.h>
++
++// Values the GPU module treats as unknown (FF_GPU_TEMP_UNSET and
++// FF_GPU_VMEM_SIZE_UNSET in gpu.h; gpu_aros.c checks that they agree).
++#define FF_AROS_GPU_TEMP_UNKNOWN (-1.7976931348623157e308)
++#define FF_AROS_GPU_MEM_UNKNOWN ((uint64_t) -1)
++
++// vHW_TelemetryUnit_* of hidd/telemetry.h. Older SDKs end the list at
++// Watts; the milli units came with telemetry.hidd 50.4.
++#define FF_AROS_TELEMETRY_UNIT_CELSIUS 5u
++#define FF_AROS_TELEMETRY_UNIT_MILLICELSIUS 9u
++
++// Degrees Celsius from a telemetry reading in `unit`, or
++// FF_AROS_GPU_TEMP_UNKNOWN for a unit that is not a temperature.
++double ffArosGpuTemperature(uint32_t unit, int32_t value);
++
++typedef struct FFArosGpuMemory {
++    uint64_t total;
++    uint64_t used;
++} FFArosGpuMemory;
++
++// Total and used memory of one kind from the driver's total and free bytes.
++// A zero or unreported total is unknown; the used amount is known only when
++// the free amount is reported and not above the total.
++FFArosGpuMemory ffArosGpuMemory(bool haveTotal, uint64_t total, bool haveFree, uint64_t free);
++
++// "pci/SSSS:BB:DD.F" (aoHidd_DevicePath of a PCI device) as its numbers.
++bool ffArosGpuParsePciPath(const char* path, uint32_t* domain, uint32_t* bus, uint32_t* device, uint32_t* function);
++
++// A PCI display-class function to leave out: the second function of a card
++// that declares itself "other display controller" is an auxiliary part of
++// the same GPU, as in the other PCI backends.
++bool ffArosGpuIsAuxiliaryFunction(uint32_t function, uint8_t subclass);
++
++// Whether a display driver's MemoryAttribs are measured video memory. Only
++// drivers known to read them from the card qualify: amdgpu and vmwaresvga
++// answer the largest framebuffer as the total and 0 as free, which is not
++// the card's memory. `classChain` lists the driver's class IDs, its own
++// first, up to `count`.
++bool ffArosGpuDriverReportsMemory(const char* const* classChain, uint32_t count);
++
++// One PCI display function as enumerated, before it becomes a result.
++typedef struct FFArosGpuPciEntry {
++    const void* object; // the pci.hidd device object, identity only
++    uint32_t domain, bus, device, function;
++    uint16_t vendorId, deviceId;
++    uint8_t subclass, revision;
++} FFArosGpuPciEntry;
++
++// Keeps the entries that are GPUs, each object once, in enumeration order.
++// Returns the number kept at the start of `entries`.
++uint32_t ffArosGpuSelectPci(FFArosGpuPciEntry* entries, uint32_t count);

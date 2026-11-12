@@ -55,9 +55,15 @@ reports through the Limpet capabilities contract on the actual output
 escape sequences; there, and in CON:, `--dynamic-interval` prints each
 round after the last instead of redrawing the screen.
 
-Modules without a reliable source on AROS (GPU, sound, battery, swap,
+The GPU module lists the PCI display controllers, named from
+`DEVS:pci.ids`. Where the graphics driver and its sensors are related to
+the card through HIDD object relations (AROS mainline from November 2026),
+it adds the driver's name, the card's memory from drivers that measure it
+(nvgfx) and, with `"temp": true` in the GPU module's configuration, the
+card's temperature. Firmware framebuffers (VESA, EFI, the Raspberry Pi's)
+do not name a GPU and are not listed. Modules without a reliable source on AROS (sound, battery, swap,
 themes, packages, DNS, users) report that they are not supported; the
-default output leaves them out. Local IP needs a running TCP/IP stack; the
+default output leaves them and the GPU out. Local IP needs a running TCP/IP stack; the
 default route is read from AROSTCP's routing table. Physical cores and
 processor packages are not reported by AROS and are left unknown.
 

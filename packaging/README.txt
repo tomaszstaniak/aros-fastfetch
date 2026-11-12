@@ -64,8 +64,16 @@ Limitations
 -----------
 - The Shell's version is not shown: it is part of the system and has no
   version string to read.
-- GPU, sound, battery, swap, theme, packages, DNS and user modules report
-  that they are not supported on AROS.
+- GPU (`fastfetch -s GPU`) lists the display controllers on the PCI bus,
+  named from DEVS:pci.ids. Where the system ties the graphics driver and
+  its sensors to the card (AROS mainline from November 2026), it also
+  shows the driver, the card's memory when the driver measures it, and,
+  with "temp": true in the GPU module's configuration, the card's
+  temperature. Firmware framebuffers (VESA, EFI, the Raspberry Pi's) name
+  no GPU; there the module reports that no PCI display controller was
+  found.
+- Sound, battery, swap, theme, packages, DNS and user modules report that
+  they are not supported on AROS.
 - Local IP needs a running TCP/IP stack (AROSTCP); without one the module
   says so and the rest of the output is unchanged.
 - The disk sizes are those the file system reports for each mounted volume.

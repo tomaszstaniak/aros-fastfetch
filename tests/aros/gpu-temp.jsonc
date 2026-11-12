@@ -1,0 +1,5 @@
+// tests/aros/gpu.script: the GPU module with the temperature on
+{
+  "logo": { "type": "none" },
+  "modules": [ { "type": "gpu", "temp": true } ]
+}

@@ -6,17 +6,25 @@
 #                 the toolchain built with this SDK (may equal AROS_CC)
 #   AROS_SDK      Developer SDK of the target system (sysroot)
 #   AROS_AR       archiver
+#   AROS_INCLUDE_AFTER  optional: headers of the same system that its SDK
+#                 does not ship, searched after the SDK's own (-idirafter)
 set(CMAKE_SYSTEM_NAME AROS)
 set(CMAKE_SYSTEM_VERSION 1)
 # CMake reads this file again in its own try-compile projects; pass the
 # paths on to them.
-list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES AROS_CC AROS_LINK_CC AROS_SDK AROS_AR)
+list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES AROS_CC AROS_LINK_CC AROS_SDK AROS_AR AROS_INCLUDE_AFTER)
 foreach(var AROS_CC AROS_LINK_CC AROS_SDK AROS_AR)
     if(NOT ${var})
         message(FATAL_ERROR "${var} is not set: copy local.example.json to local.json and fill it in")
     endif()
 endforeach()
 set(CMAKE_C_COMPILER "${AROS_CC}")
+# Set, not appended: CMake reads toolchain files more than once.
+set(AROS_C_FLAGS_INIT "")
+if(AROS_INCLUDE_AFTER)
+    set(AROS_C_FLAGS_INIT "-idirafter ${AROS_INCLUDE_AFTER}")
+endif()
+set(CMAKE_C_FLAGS_INIT "${AROS_C_FLAGS_INIT}")
 set(CMAKE_AR "${AROS_AR}" CACHE FILEPATH "" FORCE)
 set(CMAKE_SYSROOT "${AROS_SDK}")
 set(CMAKE_FIND_ROOT_PATH "${AROS_SDK}")

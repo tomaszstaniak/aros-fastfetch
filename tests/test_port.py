@@ -376,6 +376,109 @@ int main(int argc, char** argv) {
             shutil.rmtree(d)
 
 
+@unittest.skipUnless((SRC / "detection" / "gpu" / "gpu_aros_values.c").exists() and shutil.which(CC),
+                     "work/fastfetch or a host C compiler is missing")
+class GpuValues(unittest.TestCase):
+    """What the AROS GPU backend makes of pci.hidd, driver and sensor answers."""
+    @classmethod
+    def setUpClass(cls):
+        cls.exe = build("gpu_values", [ROOT / "tests" / "host" / "gpu_values.c",
+                                       SRC / "detection" / "gpu" / "gpu_aros_values.c"])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.exe.parent)
+
+    def run_harness(self, *args, stdin=""):
+        return subprocess.run([self.exe, *map(str, args)], input=stdin, capture_output=True,
+                              text=True, check=True).stdout
+
+    def test_temperature_units(self):
+        # vHW_TelemetryUnit_Celsius = 5, MilliCelsius = 9 (thermal zones)
+        self.assertEqual(self.run_harness("temp", 5, 61), "61.000\n")
+        self.assertEqual(self.run_harness("temp", 9, 45500), "45.500\n")
+        self.assertEqual(self.run_harness("temp", 9, -5250), "-5.250\n")
+        self.assertEqual(self.run_harness("temp", 9, 0), "0.000\n")
+
+    def test_temperature_other_units_unknown(self):
+        # Unknown, Raw, RPM, MilliVolts, MilliWatts are no temperature
+        for unit in (0, 2, 4, 10, 12, 99):
+            self.assertEqual(self.run_harness("temp", unit, 1500), "unknown\n", unit)
+
+    def test_memory(self):
+        GiB = 1 << 30
+        self.assertEqual(self.run_harness("mem", 1, 8 * GiB, 1, 6 * GiB), f"{8 * GiB} {2 * GiB}\n")
+        self.assertEqual(self.run_harness("mem", 1, 8 * GiB, 1, 0), f"{8 * GiB} {8 * GiB}\n")
+        self.assertEqual(self.run_harness("mem", 1, 8 * GiB, 1, 8 * GiB), f"{8 * GiB} 0\n")
+
+    def test_memory_unknown_is_not_zero(self):
+        GiB = 1 << 30
+        # no total, a zero total: nothing known, also not the used part
+        self.assertEqual(self.run_harness("mem", 0, 0, 1, GiB), "unknown unknown\n")
+        self.assertEqual(self.run_harness("mem", 1, 0, 1, 0), "unknown unknown\n")
+        # free not reported, or above the total: the total only
+        self.assertEqual(self.run_harness("mem", 1, 4 * GiB, 0, 0), f"{4 * GiB} unknown\n")
+        self.assertEqual(self.run_harness("mem", 1, 4 * GiB, 1, 5 * GiB), f"{4 * GiB} unknown\n")
+
+    def test_pci_path(self):
+        self.assertEqual(self.run_harness("path", "pci/0000:00:02.0"), "0 0 2 0\n")
+        self.assertEqual(self.run_harness("path", "pci/0001:3a:1f.7"), "1 58 31 7\n")
+        for bad in ("pci/0000", "pci/0000:00:02.0x", "acpi/\\_SB_.PCI0.GFX0", "pci/0000:00:20.0",
+                    "pci/0000:00:02.8", "pci/0000:100:02.0", "", "NULL"):
+            self.assertEqual(self.run_harness("path", bad), "invalid 99 99 99 99\n", bad)
+
+    def test_memory_only_from_measuring_drivers(self):
+        self.assertEqual(self.run_harness("memdriver", "hidd.gfx.nvgfx", "hidd.gfx", "hidd", "root"), "yes\n")
+        self.assertEqual(self.run_harness("memdriver", "hidd.gfx.nvgfx.sub", "hidd.gfx.nvgfx", "hidd.gfx"), "yes\n")
+        for chain in (["hidd.gfx.amdgpu", "hidd.gfx"], ["hidd.gfx.vmwaresvga", "hidd.gfx"],
+                      ["hidd.gfx.vesa", "hidd.gfx"], ["hidd.gfx"], []):
+            self.assertEqual(self.run_harness("memdriver", *chain), "no\n", chain)
+
+    def test_select(self):
+        # objects: a card and its auxiliary function (0x80 on function 1),
+        # a second card, a repeated object, 0x80 on function 0 (kept), a
+        # third function of another card
+        stdin = "1 0 0\n2 1 128\n3 0 2\n1 0 0\n4 0 128\n5 2 0\n"
+        self.assertEqual(self.run_harness("select", stdin=stdin), "1\n3\n4\n5\n")
+        self.assertEqual(self.run_harness("select", stdin=""), "")
+
+
+@unittest.skipUnless((SRC / "common" / "aros" / "aros_memmem.c").exists() and shutil.which(CC),
+                     "work/fastfetch or a host C compiler is missing")
+class Memmem(unittest.TestCase):
+    def test_memmem(self):
+        d = Path(tempfile.mkdtemp(prefix="ff-host-"))
+        try:
+            harness = d / "t.c"
+            # the port's memmem under another name, beside the host's own
+            harness.write_text('#define memmem ff_aros_memmem\n#include "common/aros/aros_memmem.c"\n' + r'''
+#include <stdio.h>
+int main([[maybe_unused]] int argc, char** argv) {
+    const char* h = argv[1];
+    const char* n = argv[2];
+    size_t hl = strlen(h), nl = strlen(n);
+    const char* r = ff_aros_memmem(h, hl, n, nl);
+    printf("%ld\n", r ? (long) (r - h) : -1L);
+    return 0;
+}
+''')
+            exe = build("memmem", [harness])
+            run = lambda h, n: subprocess.run([exe, h, n], capture_output=True, text=True, check=True).stdout
+            try:
+                self.assertEqual(run("\n10de  NVIDIA\n1234  x", "\n1234  "), "13\n")
+                self.assertEqual(run("aaab", "aab"), "1\n")
+                self.assertEqual(run("abc", "abc"), "0\n")
+                self.assertEqual(run("abc", "bcd"), "-1\n")
+                self.assertEqual(run("ab", "abc"), "-1\n")
+                self.assertEqual(run("abc", ""), "0\n")
+                self.assertEqual(run("", "a"), "-1\n")
+                self.assertEqual(run("xxa", "a"), "2\n")
+            finally:
+                shutil.rmtree(exe.parent)
+        finally:
+            shutil.rmtree(d)
+
+
 class PatchTooling(unittest.TestCase):
     def test_header_fields(self):
         """Every saved patch carries every required header field."""
