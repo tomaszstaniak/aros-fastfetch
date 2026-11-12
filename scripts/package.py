@@ -6,11 +6,10 @@
 Called by `fastfetch.py package`, which has checked the executable against
 its build record. The archive holds one drawer, Fastfetch/: the program,
 its README and licences, the presets, and the patch series it was built
-from. For the PC targets apkg-pack (arospkg) writes the archive with the
-catalogue manifest in .arospkg/manifest.toml and checks it. The Raspberry Pi
-archive has no manifest: the catalogue has no platform field, and an
-aarch64/v1 entry would also be offered to Macaros (AROS-dev
-docs/coding-standards.md, "Target names").
+from. apkg-pack (arospkg) writes the archive with the catalogue manifest
+in .arospkg/manifest.toml and checks it. The catalogue has no platform
+field: the Pi archive is listed as aarch64/v1 and its manifest says that
+it is the native Raspberry Pi build (as the other Pi entries do).
 
 Archives in dist/ are never replaced; SHA256SUMS only gains lines.
 """
@@ -28,7 +27,9 @@ TARGETS = {
     "aros-x86_64-abiv1-pc": {"arch": "x86_64", "abi": "v1", "system": "mainline AROS (ABIv1) on PC",
                              "requires": ["posixc.library", "stdc.library", "stdcio.library"]},
     "aros-aarch64-abiv1-raspi": {"arch": "aarch64", "abi": "v1", "system": "native AROS on the Raspberry Pi (ABIv1)",
-                                 "requires": None},
+                                 "requires": ["posixc.library", "stdc.library", "stdcio.library"],
+                                 "notes": ["Native Raspberry Pi build (mainline ABIv1); not for PomAROS. "
+                                           "Tested under QEMU (raspi3b), not on a real Raspberry Pi."]},
 }
 EPOCH = 315532800  # 1980-01-01, the ZIP format's first date: same bytes for the same files
 
@@ -50,6 +51,8 @@ def manifest(target, version, revision):
         "depends_checked = true",
         "",
     ]
+    if t.get("notes"):
+        lines += ["post_install_notes = ["] + [f"  {json.dumps(n)}," for n in t["notes"]] + ["]", ""]
     for lib in t["requires"]:
         lines += ["[[requires_system]]", 'type = "library"', f'id   = "{lib}"', ""]
     lines += ["[launch]", 'executable = "fastfetch"', 'mode       = "shell"', ""]
@@ -100,19 +103,6 @@ def stage(drawer, target, version, build):
     (source / "BUILD.json").write_text(json.dumps(record, indent=2) + "\n")
 
 
-def write_zip(drawer_parent, out):
-    """The Pi archive: the drawer only, fixed dates and modes."""
-    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for p in sorted(drawer_parent.rglob("*")):
-            rel = p.relative_to(drawer_parent).as_posix()
-            if rel.startswith(NAME + ".arospkg"):
-                continue
-            info = zipfile.ZipInfo(rel + ("/" if p.is_dir() else ""), (1980, 1, 1, 0, 0, 0))
-            info.external_attr = ((0o40755 if p.is_dir() else 0o100755 if p.name == "fastfetch" else 0o100644) << 16)
-            info.compress_type = zipfile.ZIP_DEFLATED
-            z.writestr(info, b"" if p.is_dir() else p.read_bytes())
-
-
 def main():
     if len(sys.argv) != 4:
         raise SystemExit(__doc__)
@@ -131,16 +121,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix="fastfetch-package-") as d:
         parent = Path(d)
         stage(parent / NAME, target, version, build)
-        if TARGETS[target]["requires"] is None:
-            write_zip(parent, out)
-        else:
-            (parent / f"{NAME}.arospkg.toml").write_text(manifest(target, upstream, int(rev)))
-            apkg = json.loads((ROOT / "local.json").read_text()).get("apkg_pack")
-            if not apkg or not Path(apkg).is_file():
-                raise RuntimeError("local.json: set apkg_pack to arospkg's tools/apkg-pack")
-            subprocess.run([sys.executable, apkg, "build", parent / NAME, "--output", out,
-                            "--epoch", str(EPOCH)], check=True)
-            subprocess.run([sys.executable, apkg, "check", out], check=True)
+        (parent / f"{NAME}.arospkg.toml").write_text(manifest(target, upstream, int(rev)))
+        apkg = json.loads((ROOT / "local.json").read_text()).get("apkg_pack")
+        if not apkg or not Path(apkg).is_file():
+            raise RuntimeError("local.json: set apkg_pack to arospkg's tools/apkg-pack")
+        subprocess.run([sys.executable, apkg, "build", parent / NAME, "--output", out,
+                        "--epoch", str(EPOCH)], check=True)
+        subprocess.run([sys.executable, apkg, "check", out], check=True)
     with zipfile.ZipFile(out) as z:
         if z.testzip() is not None or z.read(f"{NAME}/fastfetch") != (build / "cmake" / "fastfetch").read_bytes():
             out.unlink()
