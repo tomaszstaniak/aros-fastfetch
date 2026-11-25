@@ -5,16 +5,17 @@ Subject: [PATCH] AROS: no EGL device query in the GPU module
 
 Repository: https://github.com/fastfetch-cli/fastfetch
 Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
-Problem: the EGL headers of AROS nightly 2026-11-24 declare the device
-extensions, which turns on the EGL device query of the GPU module. It
-calls eglGetProcAddress, which egl.library does not export, so the
-program did not link against that SDK.
+Problem: the EGL headers that came to AROS with Mesa 26 (in the nightly
+SDKs from 2026-11-05 on) declare the device extensions, which turns on
+the EGL device query of the GPU module. It calls eglGetProcAddress,
+which EGL/egl.h declares but egl.library does not export, so the program
+did not link against those SDKs. Earlier packages were built with older
+headers, where this code was not compiled.
 Solution: leave the EGL device query out on AROS. The cards are read
-from pci.hidd (gpu_aros.c).
+from pci.hidd (gpu_aros.c), as before.
 Scope: detection/gpu/gpu.c, one preprocessor condition; AROS only.
 Upstream-Status: AROS-specific.
-Verification: links with the SDK of nightly 2026-11-24; the GPU module
-is the pci.hidd one as before.
+Verification: links with the SDK of nightly 2026-11-24.
 Removal: when egl.library exports eglGetProcAddress.
 ---
  src/detection/gpu/gpu.c | 3 ++-
