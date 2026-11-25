@@ -25,10 +25,12 @@ TARGETS = {
     "aros-x86_64-abiv11-pc": {"arch": "x86_64", "abi": "v11", "system": "AROS One and other ABIv11 systems on PC",
                               "requires": ["crt.library", "stdlib.library"]},
     "aros-x86_64-abiv1-pc": {"arch": "x86_64", "abi": "v1", "system": "mainline AROS (ABIv1) on PC",
-                             "requires": ["posixc.library", "stdc.library", "stdcio.library"]},
+                             "requires": ["posixc.library", "stdc.library", "stdcio.library"],
+                             "notes": ["Needs an AROS nightly of 2026-11-24 or later; for earlier nightlies use revision 4 from the project page."]},
     "aros-aarch64-abiv1-raspi": {"arch": "aarch64", "abi": "v1", "system": "native AROS on the Raspberry Pi (ABIv1)",
                                  "requires": ["posixc.library", "stdc.library", "stdcio.library"],
-                                 "notes": ["Native Raspberry Pi build (mainline ABIv1); not for PomAROS. "
+                                 "notes": ["Needs an AROS nightly of 2026-11-24 or later; for earlier nightlies use revision 4 from the project page.",
+                                           "Native Raspberry Pi build (mainline ABIv1); not for PomAROS. "
                                            "Tested under QEMU (raspi3b), not on a real Raspberry Pi."]},
 }
 EPOCH = 315532800  # 1980-01-01, the ZIP format's first date: same bytes for the same files
