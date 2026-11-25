@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: tomaszstaniak <68373859+tomaszstaniak@users.noreply.github.com>
+Date: Wed, 25 Nov 2026 11:46:48 +0100
+Subject: [PATCH] AROS: no EGL device query in the GPU module
+
+Repository: https://github.com/fastfetch-cli/fastfetch
+Base: fastfetch 2.70.0, 17bb3fd2384bd814b421d73b8c8b8d08e06cfa26
+Problem: the EGL headers of AROS nightly 2026-11-24 declare the device
+extensions, which turns on the EGL device query of the GPU module. It
+calls eglGetProcAddress, which egl.library does not export, so the
+program did not link against that SDK.
+Solution: leave the EGL device query out on AROS. The cards are read
+from pci.hidd (gpu_aros.c).
+Scope: detection/gpu/gpu.c, one preprocessor condition; AROS only.
+Upstream-Status: AROS-specific.
+Verification: links with the SDK of nightly 2026-11-24; the GPU module
+is the pci.hidd one as before.
+Removal: when egl.library exports eglGetProcAddress.
+---
+ src/detection/gpu/gpu.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/detection/gpu/gpu.c b/src/detection/gpu/gpu.c
+index b1e266d..b081261 100644
+--- a/src/detection/gpu/gpu.c
++++ b/src/detection/gpu/gpu.c
+@@ -149,7 +149,8 @@ const char* detectByOpenGL(FFlist* gpus) {
+     return error;
+ }
+ 
+-#if defined(FF_HAVE_EGL) || __has_include(<EGL/egl.h>)
++/* AROS: egl.library has no eglGetProcAddress; cards come from pci.hidd. */
++#if (defined(FF_HAVE_EGL) || __has_include(<EGL/egl.h>)) && !defined(__AROS__)
+     #include <EGL/egl.h>
+     #include <EGL/eglext.h>
+ 

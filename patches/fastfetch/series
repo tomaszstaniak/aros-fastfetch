@@ -18,3 +18,4 @@
 0018-aros-env-before-envarc-the-compact-view-as-the-d.patch
 0019-module-groups-structure-disabled-leaves-out-a-na.patch
 0020-aros-the-gpu-module-from-pci-hidd-and-hidd-relat.patch
+0021-aros-no-egl-device-query-in-the-gpu-module.patch
