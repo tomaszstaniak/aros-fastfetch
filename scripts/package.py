@@ -2,6 +2,10 @@
 """Assemble dist/Fastfetch-<VERSION>-<TARGET>.zip from build/<TARGET>.
 
     package.py TARGET VERSION BUILD_DIR
+    package.py TARGET VERSION EARLIER_ARCHIVE.zip
+
+The second form makes a new revision from a delivered archive: the same
+program and files, with the current README and completion definition.
 
 Called by `fastfetch.py package`, which has checked the executable against
 its build record. The archive holds one drawer, Fastfetch/: the program,
@@ -103,6 +107,26 @@ def stage(drawer, target, version, build):
         shutil.copy2(p, source / "patches" / p.name)
     record = json.loads((build / "build-record.json").read_text())
     (source / "BUILD.json").write_text(json.dumps(record, indent=2) + "\n")
+    completions(drawer)
+
+
+def completions(drawer):
+    # What TAB offers after "fastfetch" in Limpet: Completions/fastfetch
+    # beside the program (scripts/completions.py writes the file).
+    (drawer / "Completions").mkdir()
+    shutil.copy2(ROOT / "packaging" / "Completions" / "fastfetch", drawer / "Completions" / "fastfetch")
+
+
+def restage(drawer, target, version, archive):
+    """A new revision of a delivered archive: its files as they are, the
+    current README and the completion definition."""
+    with zipfile.ZipFile(archive) as z:
+        names = [n for n in z.namelist() if n.startswith(NAME + "/")]
+        z.extractall(drawer.parent, names)
+    (drawer / "application.json").unlink()       # apkg-pack writes it again
+    (drawer / "fastfetch").chmod(0o755)
+    (drawer / "README.txt").write_text(readme(target, version))
+    completions(drawer)
 
 
 def main():
@@ -122,7 +146,12 @@ def main():
         raise RuntimeError(f"{out} exists; delivered archives are not replaced")
     with tempfile.TemporaryDirectory(prefix="fastfetch-package-") as d:
         parent = Path(d)
-        stage(parent / NAME, target, version, build)
+        if build.suffix == ".zip":
+            restage(parent / NAME, target, version, build)
+            binary = (parent / NAME / "fastfetch").read_bytes()
+        else:
+            stage(parent / NAME, target, version, build)
+            binary = (build / "cmake" / "fastfetch").read_bytes()
         (parent / f"{NAME}.arospkg.toml").write_text(manifest(target, upstream, int(rev)))
         apkg = json.loads((ROOT / "local.json").read_text()).get("apkg_pack")
         if not apkg or not Path(apkg).is_file():
@@ -131,7 +160,7 @@ def main():
                         "--epoch", str(EPOCH)], check=True)
         subprocess.run([sys.executable, apkg, "check", out], check=True)
     with zipfile.ZipFile(out) as z:
-        if z.testzip() is not None or z.read(f"{NAME}/fastfetch") != (build / "cmake" / "fastfetch").read_bytes():
+        if z.testzip() is not None or z.read(f"{NAME}/fastfetch") != binary:
             out.unlink()
             raise RuntimeError("archive does not hold the built executable")
     sha = hashlib.sha256(out.read_bytes()).hexdigest()

@@ -77,6 +77,9 @@ Limitations
 - Local IP needs a running TCP/IP stack (AROSTCP); without one the module
   says so and the rest of the output is unchanged.
 - The disk sizes are those the file system reports for each mounted volume.
+- In Limpet 0.14.0 or later, TAB completes the options and their values:
+  "fastfetch --logo-t" and TAB gives --logo-type, TAB after it the types.
+  The list is the file Completions/fastfetch in this drawer.
 @PI@
 
 Licences

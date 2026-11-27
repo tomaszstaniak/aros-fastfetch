@@ -1,0 +1,115 @@
+# fastfetch: options for TAB in Limpet 0.14.0 or later.
+# Made by scripts/completions.py from fastfetch's doc/help.json.
+option --help -h <value>
+option --version -v
+option --version-raw
+option --list-config-paths
+option --list-data-paths
+option --list-logos
+option --list-modules
+option --list-presets
+option --list-features
+option --print-logos
+option --print-structure
+option --format default json
+option --json -j true false
+option --dynamic-interval <value>
+option --watch -w <value>
+option --config -c none all archey aros-compact aros-logo ci neofetch paleofetch screenfetch
+option --gen-config <file>
+option --thread true false
+option --wmi-timeout <value>
+option --processing-timeout <value>
+option --ds-force-drm true sysfs-only false
+option --detect-version true false
+option --logo -l <value>
+option --logo-type auto builtin small file file-raw data data-raw command-raw sixel kitty kitty-direct kitty-icat iterm chafa raw none
+option --logo-width <value>
+option --logo-height <value>
+option --logo-preserve-aspect-ratio true false
+option --logo-color-1 black red green yellow blue magenta cyan white default
+option --logo-color-2 black red green yellow blue magenta cyan white default
+option --logo-color-3 black red green yellow blue magenta cyan white default
+option --logo-color-4 black red green yellow blue magenta cyan white default
+option --logo-color-5 black red green yellow blue magenta cyan white default
+option --logo-color-6 black red green yellow blue magenta cyan white default
+option --logo-color-7 black red green yellow blue magenta cyan white default
+option --logo-color-8 black red green yellow blue magenta cyan white default
+option --logo-color-9 black red green yellow blue magenta cyan white default
+option --logo-padding <value>
+option --logo-padding-left <value>
+option --logo-padding-right <value>
+option --logo-padding-top <value>
+option --logo-padding-bottom <value>
+option --logo-print-remaining true false
+option --logo-position auto left top right
+option --logo-cache true false regen
+option --logo-animation-frame <value>
+option --file <file>
+option --file-raw <file>
+option --data <value>
+option --data-raw <value>
+option --raw <file>
+option --sixel <file>
+option --kitty <file>
+option --kitty-direct <file>
+option --kitty-icat <file>
+option --iterm <file>
+option --chafa <file>
+option --chafa-fg-only true false
+option --chafa-symbols <value>
+option --chafa-canvas-mode TRUECOLOR INDEXED_256 INDEXED_240 INDEXED_16 FGBG_BGFG FGBG INDEXED_8 INDEXED_16_8
+option --chafa-color-space RGB DIN99D
+option --chafa-dither-mode NONE ORDERED DIFFUSION
+option --structure -s <value>
+option --structure-disabled <value>
+option --stat true false
+option --pipe true false
+option --color black red green yellow blue magenta cyan white default
+option --color-keys black red green yellow blue magenta cyan white default
+option --color-title black red green yellow blue magenta cyan white default
+option --color-output black red green yellow blue magenta cyan white default
+option --color-separator black red green yellow blue magenta cyan white default
+option --duration-abbreviation true false
+option --duration-space-before-unit default always never
+option --key-width <value>
+option --key-padding-left <value>
+option --key-type none string icon both both-0 both-1 both-2 both-3 both-4
+option --key-language en ar cs de es fi fr gl he id it ja ko pl pt ru tr uk vi zh_CN zh_TW
+option --bright-color true false
+option --separator <value>
+option --show-errors true false
+option --disable-linewrap true false
+option --hide-cursor true false
+option --percent-type <value>
+option --percent-ndigits <value>
+option --percent-color-green black red green yellow blue magenta cyan white default
+option --percent-color-yellow black red green yellow blue magenta cyan white default
+option --percent-color-red black red green yellow blue magenta cyan white default
+option --percent-space-before-unit default always never
+option --percent-width <value>
+option --bar-char-elapsed <value>
+option --bar-char-total <value>
+option --bar-border-left <value>
+option --bar-border-right <value>
+option --bar-border-left-elapsed <value>
+option --bar-border-right-elapsed <value>
+option --bar-color-elapsed black red green yellow blue magenta cyan white default
+option --bar-color-total black red green yellow blue magenta cyan white default
+option --bar-color-border black red green yellow blue magenta cyan white default
+option --bar-width <value>
+option --no-buffer true false
+option --size-ndigits <value>
+option --size-binary-prefix IEC SI JEDEC
+option --size-max-prefix B kB MB GB TB PB EB ZB YB
+option --size-space-before-unit default always never
+option --freq-ndigits <value>
+option --freq-space-before-unit default always never
+option --fraction-ndigits <value>
+option --fraction-trailing-zeros default always never
+option --temp-unit D C F K
+option --temp-ndigits <value>
+option --temp-color-green black red green yellow blue magenta cyan white default
+option --temp-color-yellow black red green yellow blue magenta cyan white default
+option --temp-color-red black red green yellow blue magenta cyan white default
+option --temp-space-before-unit default always never

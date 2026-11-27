@@ -10,8 +10,16 @@ processor.resource, bsdsocket.library); nothing is taken from Linux files.
 
 ## Download
 
-[Fastfetch 2.70.0-r3 for AROS](https://github.com/tomaszstaniak/aros-fastfetch/releases/tag/v2.70.0-r3)
-is available for the three targets below.
+[Fastfetch 2.70.0-r6 for AROS](https://github.com/tomaszstaniak/aros-fastfetch/releases/tag/v2.70.0-r6)
+is available for the three targets below, or with
+[apkg](https://github.com/tomaszstaniak/arospkg): `apkg install fastfetch`.
+The mainline and Raspberry Pi archives need a nightly build of 2026-11-24
+or later; on earlier nightlies use
+[revision 4](https://github.com/tomaszstaniak/aros-fastfetch/releases/tag/v2.70.0-r4).
+
+In Limpet 0.14.0 or later, TAB completes the options and their values
+(`fastfetch --logo-t`, TAB: `--logo-type`). The package brings the list in
+`Completions/fastfetch`.
 
 ## Builds
 
